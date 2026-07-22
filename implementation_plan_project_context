@@ -1,0 +1,357 @@
+# SentinelAI — Comprehensive Codebase Exploration & Technical Review
+
+## 1. Architectural Overview
+
+SentinelAI is an **incident-centered AI security copilot** that fuses browser telemetry, ML model inference, threat intelligence, and LLM-generated explanations into a unified incident-management pipeline. It comprises three deployable units:
+
+```mermaid
+graph TB
+  subgraph "Browser Extension (MV3)"
+    BG["Background Service Worker"]
+    CS["Content Script"]
+    POP["Popup UI"]
+    OPT["Options Page"]
+  end
+
+  subgraph "FastAPI Backend"
+    API["REST API (v1)"]
+    TI["Threat Intel\n(VT/AbuseIPDB/PhishTank)"]
+    PHI["DistilBERT\nPhishing Classifier"]
+    IF["Isolation Forest\nAnomaly Detector"]
+    TCE["Threat Correlation\nEngine"]
+    RAG["RAG Service\n(pgvector)"]
+    LLM["Gemini LLM"]
+    MW["Middleware\n(Rate Limit, Logging, Errors)"]
+  end
+
+  subgraph "React Dashboard (Vite)"
+    LP["Login Page"]
+    DH["Dashboard Home"]
+    IP["Incident Pages"]
+    NP["Network Page"]
+    DP["Devices Page"]
+  end
+
+  subgraph "PostgreSQL + pgvector"
+    DB["9 Tables:\nusers, devices, sessions,\nevents, incidents, evidence,\nai_responses, threat_cache,\nplaybooks"]
+  end
+
+  BG -->|JWT + Events| API
+  CS -->|Form submissions| BG
+  POP -->|Phishing check| API
+  DH -->|REST/JSON| API
+  IP -->|REST/JSON| API
+  API --> TI
+  API --> PHI
+  API --> IF
+  TI --> TCE
+  PHI --> TCE
+  IF --> TCE
+  TCE --> RAG
+  RAG --> LLM
+  TCE --> DB
+  LLM --> DB
+```
+
+### Core Pipeline (the "Incident Lifecycle")
+
+Every event flows through a **13-step pipeline** defined in [incident_service.py](file:///e:/vatsal/sentinelai/backend/app/services/incident_service.py):
+
+1. **Extension** observes browser events (navigation, downloads, form submission)
+2. **Events API** ingests telemetry → persists `Event` row
+3. **Threat Intelligence** lookups (VirusTotal, AbuseIPDB, PhishTank — cached in `threat_cache`)
+4. **DistilBERT** classifies URLs/text as phishing or legitimate
+5. **Isolation Forest** scores network flows for anomalousness
+6. **Signal generation** — typed `Signal` objects with name, score, and reason
+7. **Threat Correlation Engine** fuses signals via noisy-OR into an `Incident`
+8. **MITRE ATT&CK mapping** from signals → technique IDs
+9. **RAG retrieval** — cosine similarity over playbook embeddings (pgvector)
+10. **Gemini LLM** generates plain-English summary + numbered remediation
+11. **Dashboard** renders the incident with evidence, AI explanation, and MITRE chips
+
+---
+
+## 2. Component Breakdown
+
+### Backend (FastAPI + SQLAlchemy async)
+
+| Layer | Files | Purpose |
+|---|---|---|
+| **API** | [router.py](file:///e:/vatsal/sentinelai/backend/app/api/v1/router.py), 8 route modules | 8 endpoint groups: auth, events, incidents, phishing, network, devices, dashboard, playbooks |
+| **Services** | 14 services in [services/](file:///e:/vatsal/sentinelai/backend/app/services) | All business logic: correlation engine, incident pipeline, auth, phishing detection, anomaly detection, threat intel, RAG, LLM, dashboard aggregation |
+| **ML** | [phishing_model.py](file:///e:/vatsal/sentinelai/backend/app/ml/phishing_model.py), [anomaly_model.py](file:///e:/vatsal/sentinelai/backend/app/ml/anomaly_model.py), [feature_engineering.py](file:///e:/vatsal/sentinelai/backend/app/ml/feature_engineering.py) | DistilBERT phishing classifier + Isolation Forest anomaly detector |
+| **Models** | 9 ORM models in [models/](file:///e:/vatsal/sentinelai/backend/app/models) | User, Device, Session, Event, Incident, Evidence, AIResponse, Playbook, ThreatCache |
+| **Repositories** | 10 repositories in [repositories/](file:///e:/vatsal/sentinelai/backend/app/repositories) | Data access layer with a generic `BaseRepository` pattern |
+| **Schemas** | 11 Pydantic schemas in [schemas/](file:///e:/vatsal/sentinelai/backend/app/schemas) | Request/response validation |
+| **Middleware** | [rate_limit.py](file:///e:/vatsal/sentinelai/backend/app/middleware/rate_limit.py), [error_handler.py](file:///e:/vatsal/sentinelai/backend/app/middleware/error_handler.py), [logging_middleware.py](file:///e:/vatsal/sentinelai/backend/app/middleware/logging_middleware.py) | In-memory rate limiting, centralized exception handling, request logging |
+| **Core** | [config.py](file:///e:/vatsal/sentinelai/backend/app/core/config.py), [security.py](file:///e:/vatsal/sentinelai/backend/app/core/security.py), [database.py](file:///e:/vatsal/sentinelai/backend/app/core/database.py), [logging.py](file:///e:/vatsal/sentinelai/backend/app/core/logging.py), [exceptions.py](file:///e:/vatsal/sentinelai/backend/app/core/exceptions.py) | Configuration (pydantic-settings), JWT auth, async SQLAlchemy, structured logging, typed exception hierarchy |
+
+### Dashboard (React + Vite + TypeScript + TailwindCSS)
+
+| Area | Files | Purpose |
+|---|---|---|
+| **Pages** | 8 pages in [pages/](file:///e:/vatsal/sentinelai/dashboard/src/pages) | Login, Dashboard Home, Incidents list, Incident detail, Security Operations, Devices, Network, Settings |
+| **Components** | 22 components across `dashboard/`, `incidents/`, `network/`, `layout/`, `ui/` | Shadcn-pattern primitives (Button, Card, Dialog, Select, etc.), security-specific (SeverityBadge, MitreChips, SecurityScoreGauge, EvidenceList, AIExplanation), layout (Sidebar, Topbar) |
+| **State** | [AuthContext.tsx](file:///e:/vatsal/sentinelai/dashboard/src/context/AuthContext.tsx), 3 hooks | Context-based auth, `useDashboard`, `useIncidents` polling hooks |
+| **API client** | [api-client.ts](file:///e:/vatsal/sentinelai/dashboard/src/lib/api-client.ts) | Typed fetch wrapper with JWT auto-refresh on 401 |
+
+### Extension (Chrome MV3 + React + TypeScript)
+
+| Module | File | Purpose |
+|---|---|---|
+| **Background** | [index.ts](file:///e:/vatsal/sentinelai/extension/src/background/index.ts) | Navigation watcher → phishing check, download reporter, form-submission relay, heartbeat alarm |
+| **Content Script** | [content/index.ts](file:///e:/vatsal/sentinelai/extension/src/content/index.ts) | Dependency-free IIFE detecting password-field form submissions |
+| **Popup** | [Popup.tsx](file:///e:/vatsal/sentinelai/extension/src/popup/Popup.tsx) | Login form, real-time verdict display (safe/threat), Leave Site/Report/View Details actions |
+| **Options** | [Options.tsx](file:///e:/vatsal/sentinelai/extension/src/options/Options.tsx) | API URL config, account registration |
+| **Lib** | [api.ts](file:///e:/vatsal/sentinelai/extension/src/lib/api.ts), [auth.ts](file:///e:/vatsal/sentinelai/extension/src/lib/auth.ts), [storage.ts](file:///e:/vatsal/sentinelai/extension/src/lib/storage.ts) | chrome.storage-backed API client, device registration, typed storage |
+
+### Database (PostgreSQL + pgvector)
+
+9 tables across [schema.sql](file:///e:/vatsal/sentinelai/database/schema.sql):
+- **users** → **devices** → **sessions**, **events** (FK chain)
+- **incidents** ← **evidence** → **events** (the correlation join)
+- **incidents** ← **ai_responses** (LLM explanations)
+- **playbooks** (pgvector embeddings for RAG)
+- **threat_cache** (indicator + source keyed, TTL-based)
+
+---
+
+## 3. Strengths
+
+1. **Excellent architecture doc fidelity** — the implementation faithfully mirrors every section of the architecture spec, with code comments citing specific sections
+2. **Incident-centered design** — the entire system is genuinely built around the `Incident` model; every signal, every ML output, every LLM call feeds into it
+3. **Noisy-OR signal fusion** in the Threat Correlation Engine — a principled choice that compounds independent evidence without artificial ceilings
+4. **Graceful degradation everywhere** — DistilBERT falls back to heuristics, Gemini falls back to templates, RAG falls back to MITRE-overlap search, threat intel degrades per-provider
+5. **Clean layered architecture** — Repository → Service → API separation with domain exceptions translated at a single middleware layer
+6. **Strong typing throughout** — Python type hints + Pydantic schemas + TypeScript strict mode + shared types
+7. **Good test infrastructure** — 13 unit tests + 9 integration tests with an elegant `requires_database` skip-if-unavailable pattern
+8. **Production-quality middleware** — rate limiting, structured JSON/human logging, centralized error handling with request IDs
+9. **Sensible ML pipeline** — feature engineering is shared between training and inference, model loading is lazy+singleton+thread-safe
+10. **Well-documented** — 7 markdown docs covering architecture, API, installation, deployment, developer guide, testing, and folder structure
+11. **Extension security** — content script is dependency-free (IIFE), auth tokens stored in `chrome.storage.local`, MV3-compliant
+
+---
+
+## 4. Prioritized Weaknesses & Risks
+
+### 🔴 Critical
+
+| # | Issue | Location | Impact |
+|---|---|---|---|
+| **S1** | **No password strength validation on registration** | [auth_service.py](file:///e:/vatsal/sentinelai/backend/app/services/auth_service.py#L32-L42) | Any password (even `"a"`) is accepted; only client-side `minLength=8` exists |
+| **S2** | **JWT tokens are never invalidated** | [security.py](file:///e:/vatsal/sentinelai/backend/app/core/security.py) | No token blocklist/revocation on logout; compromised tokens remain valid until expiry (24h access, 7d refresh) |
+| **S3** | **CORS wildcard `allow_methods=["*"]`, `allow_headers=["*"]`** | [main.py](file:///e:/vatsal/sentinelai/backend/app/main.py#L48-L55) | Overly permissive — DELETE/PUT are exposed even though not all routes use them |
+| **S4** | **No input sanitization on `payload_json` (JSONB)** | [event.py](file:///e:/vatsal/sentinelai/backend/app/models/event.py#L54) | Arbitrary JSON is stored; no size limit or schema validation — potential for storage abuse or XSS if rendered unsanitized in the dashboard |
+| **S5** | **Rate limiter is per-IP only, no per-user limiting** | [rate_limit.py](file:///e:/vatsal/sentinelai/backend/app/middleware/rate_limit.py) | All authenticated users behind the same NAT share a single IP bucket; a single malicious user can exhaust it |
+
+### 🟠 High
+
+| # | Issue | Location | Impact |
+|---|---|---|---|
+| **H1** | **Synchronous ML inference on the request path** | [phishing_model.py](file:///e:/vatsal/sentinelai/backend/app/ml/phishing_model.py#L160-L188), [incident_service.py](file:///e:/vatsal/sentinelai/backend/app/services/incident_service.py#L63-L76) | DistilBERT and Isolation Forest run synchronously in the async event loop, blocking all concurrent requests during inference (~50-200ms per URL) |
+| **H2** | **No pagination/throttle on event batch ingestion** | [events.py](file:///e:/vatsal/sentinelai/backend/app/api/v1/events.py#L58-L96) | A single batch request can contain unlimited events, each triggering the full pipeline (ML + threat intel + LLM) — trivial DoS vector |
+| **H3** | **`asyncio.create_task` for replay without lifecycle management** | [network_service.py](file:///e:/vatsal/sentinelai/backend/app/services/network_service.py#L99-L101) | Fire-and-forget task; no cancellation, no status tracking, no error recovery. Task reference is dropped immediately |
+| **H4** | **LLM calls are synchronous (blocking the event loop)** | [llm_service.py](file:///e:/vatsal/sentinelai/backend/app/services/llm_service.py#L96) | `client.models.generate_content()` is a sync call inside an async pipeline — blocks the entire server for 1-5 seconds per incident |
+| **H5** | **No RBAC / user roles** | Entire auth system | Every user has identical permissions; no admin vs. analyst vs. viewer roles |
+| **H6** | **Dashboard lacks real-time updates** | [useDashboard.ts](file:///e:/vatsal/sentinelai/dashboard/src/hooks/useDashboard.ts) | Dashboard uses polling (or one-shot fetch), not WebSocket/SSE — incidents don't appear until the user manually refreshes or navigates |
+
+### 🟡 Medium
+
+| # | Issue | Location | Impact |
+|---|---|---|---|
+| **M1** | **No database connection health check in lifespan** | [main.py](file:///e:/vatsal/sentinelai/backend/app/main.py#L26-L30) | The `/health` endpoint doesn't verify DB connectivity — misleading for load balancers |
+| **M2** | **Rate limiter state lost on restart** | [rate_limit.py](file:///e:/vatsal/sentinelai/backend/app/middleware/rate_limit.py) | In-memory dict — documented, but means rapid restart+burst can bypass limits |
+| **M3** | **No request body size limit** | [main.py](file:///e:/vatsal/sentinelai/backend/app/main.py) | CSV uploads and batch events have no explicit size cap beyond what uvicorn defaults to |
+| **M4** | **Missing `updated_at` timestamp on incidents** | [incident.py](file:///e:/vatsal/sentinelai/backend/app/models/incident.py) | Cannot track when an incident was last enriched or status-changed |
+| **M5** | **Extension stores JWT in `chrome.storage.local`** | [storage.ts](file:///e:/vatsal/sentinelai/extension/src/lib/storage.ts) | Accessible to any code running in the extension context; `chrome.storage.session` would be more secure for tokens |
+| **M6** | **No API response caching on the frontend** | [api-client.ts](file:///e:/vatsal/sentinelai/dashboard/src/lib/api-client.ts) | Every navigation triggers fresh fetches; React Query/SWR would add deduplication and stale-while-revalidate |
+| **M7** | **Test coverage is thin for the services layer** | [tests/](file:///e:/vatsal/sentinelai/backend/tests) | Only 5 test files covering auth, phishing, anomaly, correlation, and incidents API — no tests for threat_intel, LLM, RAG, network, or dashboard services |
+| **M8** | **No E2E or visual tests for the dashboard** | — | Dashboard relies entirely on TypeScript type-checking; no Playwright/Cypress or component tests |
+| **M9** | **`conftest.py` uses deprecated `asyncio.get_event_loop()`** | [conftest.py](file:///e:/vatsal/sentinelai/backend/tests/conftest.py#L44-L45) | Will emit deprecation warnings on Python 3.12+ |
+
+### 🔵 Low / Tech Debt
+
+| # | Issue | Location |
+|---|---|---|
+| **L1** | `notifications` permission missing from manifest | [manifest.json](file:///e:/vatsal/sentinelai/extension/manifest.json#L31) — extension calls `chrome.notifications.create` but doesn't declare the `"notifications"` permission |
+| **L2** | Hardcoded demo credentials in the login page | [LoginPage.tsx](file:///e:/vatsal/sentinelai/dashboard/src/pages/LoginPage.tsx#L107) |
+| **L3** | `alembic.ini` has a dummy `sqlalchemy.url` that's overridden at runtime | [alembic.ini](file:///e:/vatsal/sentinelai/backend/alembic.ini#L4) — not a bug, but confusing |
+| **L4** | No `.env.example` in the project root | — the three `.env.example` files are in individual subdirectories |
+| **L5** | Shared `types/api.ts` in `shared/` is 5.9KB but has no consumer | [shared/types/api.ts](file:///e:/vatsal/sentinelai/shared/types/api.ts) — dashboard and extension both have their own type files |
+
+---
+
+## 5. Phase 2 — Local Setup Guide
+
+### Prerequisites
+
+| Software | Version | Required? |
+|---|---|---|
+| **Python** | 3.11+ | ✅ |
+| **Node.js** | 18+ (LTS recommended) | ✅ |
+| **PostgreSQL** | 16.x with `pgvector` extension | ✅ |
+| **Git** | Any | ✅ |
+| **NVIDIA GPU + CUDA** | Optional (RTX 50-series w/ CUDA 12.8) | ❌ (CPU works fine for DistilBERT) |
+
+### Step-by-step
+
+#### 1. PostgreSQL + pgvector
+
+**Windows (native)**:
+```powershell
+# Download and install PostgreSQL 16 from https://www.postgresql.org/download/windows/
+# During installation, note the port (default 5432) and superuser password
+
+# After installation, open pgAdmin or psql:
+psql -U postgres
+
+# In psql:
+CREATE ROLE sentinelai WITH LOGIN PASSWORD 'sentinelai';
+CREATE DATABASE sentinelai OWNER sentinelai;
+\c sentinelai
+CREATE EXTENSION IF NOT EXISTS vector;
+\q
+```
+
+**WSL2**:
+```bash
+sudo apt update && sudo apt install -y postgresql-16 postgresql-16-pgvector
+sudo service postgresql start
+sudo -u postgres psql -c "CREATE ROLE sentinelai WITH LOGIN PASSWORD 'sentinelai';"
+sudo -u postgres psql -c "CREATE DATABASE sentinelai OWNER sentinelai;"
+sudo -u postgres psql -d sentinelai -c "CREATE EXTENSION IF NOT EXISTS vector;"
+```
+
+> [!IMPORTANT]
+> **pgvector** must be installed as a PostgreSQL extension. On Windows, you may need to install it manually — download from [pgvector releases](https://github.com/pgvector/pgvector/releases) and follow the Windows instructions. On WSL2/Linux, `postgresql-16-pgvector` is the package to install.
+
+#### 2. Backend Setup
+
+```powershell
+cd e:\vatsal\sentinelai\backend
+
+# Create virtual environment
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+# Install PyTorch FIRST (CPU-only; add --index-url for GPU):
+pip install torch
+
+# Install all other dependencies:
+pip install -r requirements.txt
+
+# Configure environment:
+copy .env.example .env
+# EDIT .env: set JWT_SECRET_KEY to a real random secret:
+#   python -c "import secrets; print(secrets.token_urlsafe(64))"
+# Optionally set GEMINI_API_KEY, VIRUSTOTAL_API_KEY, ABUSEIPDB_API_KEY
+
+# Run database migrations:
+alembic upgrade head
+
+# Seed database (demo user + playbooks):
+python ..\scripts\seed_db.py
+
+# Start the backend:
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+```
+
+#### 3. Dashboard Setup
+
+```powershell
+# In a NEW terminal:
+cd e:\vatsal\sentinelai\dashboard
+copy .env.example .env
+npm install
+npm run dev
+```
+
+Dashboard available at **http://localhost:5173**
+Login: `demo@sentinelai.io` / `SentinelDemo123!`
+
+#### 4. Extension Setup
+
+```powershell
+# In a NEW terminal:
+cd e:\vatsal\sentinelai\extension
+npm install
+npm run build
+```
+
+Then in Chrome:
+1. Navigate to `chrome://extensions`
+2. Enable **Developer mode** (toggle in top-right)
+3. Click **Load unpacked** → select `extension/dist/`
+4. Click the SentinelAI extension icon → sign in with the demo credentials
+
+#### 5. Verify Everything Works
+
+| Check | How |
+|---|---|
+| Backend health | `curl http://localhost:8000/health` → `{"status":"ok"}` |
+| API docs | Open http://localhost:8000/docs |
+| Dashboard login | Open http://localhost:5173 → sign in → see the security score gauge and sample incident |
+| Incident detail | Click the "Credential Theft Attempt" incident → verify AI explanation, evidence list, MITRE chips |
+| Extension popup | Click the SentinelAI icon on any page → should show "No threats detected" for safe sites |
+| Phishing detection | Visit `http://amaz0n-login-security-verify.tk` (or any suspicious-looking URL) → extension should show a warning badge |
+
+### Common Setup Issues
+
+| Issue | Fix |
+|---|---|
+| `ModuleNotFoundError: No module named 'psycopg2'` | Install `pip install psycopg2-binary` (should be in requirements.txt already) |
+| `could not translate host name "localhost" to address` | Ensure PostgreSQL is running and accepting connections on port 5432 |
+| `extension vector is not available` | Install pgvector: on Windows follow [manual build instructions](https://github.com/pgvector/pgvector#windows), on Linux install `postgresql-16-pgvector` |
+| `torch` import fails | Install torch separately before `requirements.txt` — see the comment in requirements.txt |
+| Alembic migration fails | Ensure `DATABASE_URL_SYNC` in `.env` uses `postgresql+psycopg2://` (sync driver) |
+| Dashboard shows "Unable to load dashboard" | Backend must be running on port 8000; check `.env` in dashboard says `VITE_API_BASE_URL=http://localhost:8000/api/v1` |
+| Extension API calls fail | Open extension Options page → verify API URL is `http://localhost:8000/api/v1` |
+
+---
+
+## 6. High-Impact Improvements (Roadmap)
+
+### Tier 1 — Security Hardening (do first)
+
+1. **Server-side password validation** — enforce minimum length, complexity, or use `zxcvbn`
+2. **JWT revocation list** — store invalidated token JTIs in Redis or DB; check on every auth request
+3. **Tighten CORS** — restrict `allow_methods` to only the HTTP methods actually used per route
+4. **Payload size limits** — cap `payload_json` size and batch event count
+5. **Move extension tokens to `chrome.storage.session`** — cleared on browser restart
+
+### Tier 2 — Performance & Reliability
+
+6. **Offload ML inference to a thread pool** — wrap `PhishingClassifier.predict()` and `AnomalyDetector.predict()` in `asyncio.to_thread()` so they don't block the async event loop
+7. **Make LLM calls async** — use the async client from `google-genai` or run sync calls in a thread pool
+8. **Add WebSocket/SSE for real-time dashboard** — incidents appear instantly without polling
+9. **Managed replay tasks** — replace `asyncio.create_task` with a proper task registry (with cancellation, status tracking)
+10. **Add React Query / TanStack Query** — replace manual `useEffect` + `useState` data fetching with cache-aware mutations
+
+### Tier 3 — Features (Hackathon "Wow" Factor)
+
+11. **Threat Graph visualization** — interactive force-directed graph showing incidents → evidence → events → MITRE techniques (deferred per spec, high visual impact)
+12. **AI Investigation Mode** — Gemini-powered chat interface for querying incidents in natural language
+13. **Executive Reports** — exportable PDF/HTML summary with security posture trends
+14. **Attack Replay visualization** — animated timeline of how an attack unfolded across events
+15. **Dark/light theme toggle** — the design system already uses CSS variables; expose a toggle
+
+### Tier 4 — Code Quality & DX
+
+16. **Expand test coverage** — add tests for threat_intel, network_service, LLM/RAG, and dashboard services
+17. **Add E2E tests** — Playwright tests for the full login → dashboard → incident flow
+18. **Docker Compose setup** — single `docker-compose up` for the full stack
+19. **CI/CD pipeline** — GitHub Actions for lint, test, build on PRs
+20. **Fix `notifications` permission** in extension manifest
+
+---
+
+## Open Questions
+
+> [!IMPORTANT]
+> **Before I start implementing changes, please confirm:**
+>
+> 1. **Do you have PostgreSQL + pgvector installed locally?** (Windows native or WSL2?)
+> 2. **Do you have a Gemini API key** you'd like to use, or should the system run with templated fallbacks?
+> 3. **What's the primary goal?** — Hackathon submission polish? Production-readiness? Feature additions? Security hardening?
+> 4. **Which improvement tier(s) should I prioritize first?**
+> 5. **Is there a deadline** that should influence the scope of changes?

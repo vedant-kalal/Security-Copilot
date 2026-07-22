@@ -1,0 +1,42 @@
+[
+  {
+    "title": "Phishing Link Response Playbook",
+    "mitre_techniques": ["T1566", "T1566.002"],
+    "content": "PHISHING LINK RESPONSE\n\n1. Do not enter any credentials or personal information on the flagged page.\n2. Close the browser tab immediately; do not click any further links on the page.\n3. If any credentials were already entered, reset the password for that account immediately, and for any other account sharing the same password.\n4. Enable multi-factor authentication (MFA) on the affected account if it is not already active.\n5. Report the URL to your security team and, optionally, to the browser vendor's Safe Browsing report form.\n6. Run a full malware scan on the device as a precaution.\n7. Monitor the affected account for unauthorized activity over the next 7 days."
+  },
+  {
+    "title": "Credential Theft Attempt Playbook",
+    "mitre_techniques": ["T1566.002", "T1056.003", "T1078"],
+    "content": "CREDENTIAL THEFT CONTAINMENT\n\n1. Treat any credentials entered on the flagged site as compromised.\n2. Immediately reset the password for the affected account from a trusted, uncompromised device.\n3. Revoke active sessions/tokens for the affected account if the service supports it.\n4. Enable MFA if not already enabled, and review MFA methods for unauthorized additions.\n5. Check for suspicious login activity or new email forwarding rules on the account.\n6. Notify your security team so the domain can be added to the organization's block list.\n7. If this is a corporate account, notify IT/Security immediately per your incident response plan."
+  },
+  {
+    "title": "Malicious File Download Playbook",
+    "mitre_techniques": ["T1204.002", "T1105"],
+    "content": "MALICIOUS DOWNLOAD RESPONSE\n\n1. Do not open or execute the downloaded file.\n2. Delete the file from the Downloads folder and empty the trash/recycle bin.\n3. Disconnect the device from the network (Wi-Fi/Ethernet) if you suspect the file was already executed.\n4. Run a full antivirus/EDR scan of the device.\n5. Check Task Manager / Activity Monitor for unfamiliar running processes.\n6. If the file was executed, treat the device as compromised: change passwords from a different device and notify security.\n7. Preserve the file (do not delete) if instructed by your security team for forensic analysis."
+  },
+  {
+    "title": "Network Reconnaissance / Port Scan Playbook",
+    "mitre_techniques": ["T1595", "T1046"],
+    "content": "PORT SCAN RESPONSE\n\n1. Identify the source IP address of the scanning activity from the evidence tab.\n2. Verify whether the source is an authorized vulnerability scanner or penetration test; if so, no action is required.\n3. If unauthorized, block the source IP at the firewall/network perimeter.\n4. Review firewall and IDS/IPS logs for any successful connections following the scan.\n5. Confirm that no unnecessary ports/services are exposed to the internet.\n6. Increase monitoring on the targeted host for the next 24-48 hours.\n7. Document the incident and update the threat intelligence block list with the source IP."
+  },
+  {
+    "title": "Abnormal Network Traffic Volume Playbook",
+    "mitre_techniques": ["T1499", "T1046"],
+    "content": "HIGH-VOLUME TRAFFIC / POSSIBLE DoS RESPONSE\n\n1. Confirm whether the traffic spike correlates with legitimate business activity (backups, large file transfers, deployments).\n2. If unexplained, identify the source and destination of the abnormal flow from the evidence tab.\n3. Apply rate limiting or temporarily block the offending source at the firewall if it is external.\n4. Check service/application health for degraded performance or downtime.\n5. Engage your ISP or cloud provider's DDoS mitigation service if the volume is overwhelming local defenses.\n6. Document traffic patterns and thresholds for future baseline tuning of the anomaly model.\n7. Review the incident with your network team once traffic normalizes."
+  },
+  {
+    "title": "Command-and-Control Beaconing Playbook",
+    "mitre_techniques": ["T1071.001", "T1041"],
+    "content": "C2 BEACONING RESPONSE\n\n1. Isolate the affected device from the network immediately to prevent further data exfiltration.\n2. Identify the destination domain/IP of the beaconing traffic and check it against threat intelligence feeds.\n3. Preserve system memory and disk state if forensic analysis is required — do not reboot the device.\n4. Run a full EDR/antivirus scan focused on persistence mechanisms (scheduled tasks, startup entries, services).\n5. Rotate credentials that were used on the affected device.\n6. Block the destination domain/IP at the DNS and firewall layer organization-wide.\n7. Escalate to your security team for full forensic investigation before returning the device to service."
+  },
+  {
+    "title": "Brute-Force Login Attempt Playbook",
+    "mitre_techniques": ["T1110", "T1078"],
+    "content": "BRUTE-FORCE LOGIN RESPONSE\n\n1. Confirm whether the failed login attempts originated from the account owner (e.g. forgotten password) or an unknown source.\n2. If unauthorized, lock the targeted account temporarily and force a password reset.\n3. Enable account lockout policies and MFA if not already enforced.\n4. Block or rate-limit the source IP address at the authentication layer.\n5. Review the account's recent successful logins for any that do not match the user's normal pattern.\n6. Notify the account owner of the activity and confirm their current session is legitimate.\n7. Monitor the account closely for the following 48 hours."
+  },
+  {
+    "title": "Confirmed Malicious Domain Playbook",
+    "mitre_techniques": ["T1566.002", "T1071.001"],
+    "content": "MALICIOUS DOMAIN RESPONSE\n\n1. Immediately navigate away from the flagged domain; do not interact with any of its content.\n2. Add the domain to your organization's DNS/firewall block list.\n3. Check browser history for any other visits to the same domain across your devices.\n4. If any files were downloaded or forms submitted, follow the Malicious File Download or Credential Theft playbooks respectively.\n5. Report the domain to the relevant threat intelligence provider (VirusTotal, PhishTank) if not already flagged.\n6. Clear browser cache and cookies associated with the domain.\n7. Continue monitoring the device for 24-48 hours for any follow-on activity."
+  }
+]

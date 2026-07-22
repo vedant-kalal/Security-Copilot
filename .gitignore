@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+
+# Environment files
+.env
+*.env.local
+
+# Node
+node_modules/
+dist/
+dist-extension/
+.vite/
+*.local
+
+# Model artifacts (large binary files — regenerate via scripts/train_isolation_forest.py)
+backend/model_artifacts/*.joblib
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+*.swp
+
+# Logs
+*.log
