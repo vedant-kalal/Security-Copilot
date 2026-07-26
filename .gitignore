@@ -17,9 +17,16 @@ dist/
 dist-extension/
 .vite/
 *.local
+*.tsbuildinfo
 
 # Model artifacts (large binary files — regenerate via scripts/train_isolation_forest.py)
 backend/model_artifacts/*.joblib
+
+# Runtime state (SQLite verdict cache — router fast path, spec section 2)
+backend/data/cache.db
+backend/data/history.db
+backend/data/screenshots/
+backend/data/reports/
 
 # Editor / OS
 .vscode/

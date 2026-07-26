@@ -1,0 +1,8 @@
+{
+  "_comment": "Template only — not yet functional. `path` must point to the built host.py (or a packaged executable wrapping it), and `allowed_origins` needs the extension's real chrome-extension://<id>/ once the extension is loaded and has an ID. Spec section 9.",
+  "name": "com.securitycopilot.host",
+  "description": "security-copilot native messaging host — bridges OS-level network flow data to the Chrome extension.",
+  "path": "host.py",
+  "type": "stdio",
+  "allowed_origins": ["chrome-extension://REPLACE_WITH_EXTENSION_ID/"]
+}

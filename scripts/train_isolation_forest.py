@@ -31,10 +31,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = REPO_ROOT / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
-from app.ml.feature_engineering import FEATURE_NAMES, extract_features  # noqa: E402
+from network.feature_engineering import FEATURE_NAMES, extract_features  # noqa: E402
 
 DEFAULT_OUTPUT_DIR = BACKEND_DIR / "model_artifacts"
-DEFAULT_SAMPLE_CSV = BACKEND_DIR / "app" / "data" / "network_datasets" / "cicids2017_sample.csv"
+DEFAULT_SAMPLE_CSV = BACKEND_DIR / "data" / "network_datasets" / "cicids2017_sample.csv"
 
 
 def load_baseline_from_csv(csv_path: Path, benign_label_values: tuple[str, ...] = ("BENIGN", "benign", "0")) -> np.ndarray:

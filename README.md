@@ -1,133 +1,160 @@
-# SentinelAI — AI Security Copilot
+# security-copilot
 
-A complete, working implementation of the SentinelAI product spec: a browser extension + React dashboard +
-FastAPI backend that combines phishing detection, network anomaly detection, threat correlation, MITRE ATT&CK
-mapping, and RAG-grounded LLM-generated guided response into a single incident-centered security product.
+A personal security assistant: paste a URL or a page's text (via the Chrome extension, a small web UI, or a
+terminal), and a [LangGraph](https://github.com/langchain-ai/langgraph) agent investigates it — a real headless
+browser sandbox, WHOIS/VirusTotal, two pretrained phishing-classification models, and a web search to find the
+real site if brand impersonation is suspected — then returns a plain-English verdict: **dangerous / suspicious /
+safe**, with a confidence score, a reason, and (when relevant) links to the legitimate site it thinks you meant
+to visit.
 
-> Not a phishing detector. A Security Copilot. Every signal — a suspicious URL, a malicious file download, a
-> network anomaly — flows through one **Threat Correlation Engine** into one **Incident**, which the dashboard
-> explains in plain English with a concrete remediation plan.
+This is a from-scratch POC, not a production product — see [Status](#status) for what's real vs. stubbed.
 
-## What's inside
+## What it does
 
-| Component | Stack |
-|---|---|
-| **Backend** | FastAPI, SQLAlchemy (async), PostgreSQL + pgvector, JWT auth |
-| **Dashboard** | React, Vite, TypeScript, TailwindCSS, shadcn-pattern components, Framer Motion |
-| **Extension** | Chrome Manifest V3, React, TypeScript |
-| **ML** | DistilBERT (phishing classification), Isolation Forest (network anomaly detection) |
-| **Threat Intel** | VirusTotal, AbuseIPDB, PhishTank — with caching |
-| **RAG / LLM** | Google Gemini (`gemini-embedding-001` + `gemini-flash-latest`) over a pgvector playbook library |
-| **Deployment** | Native (Windows/WSL2/Linux) — see Deployment guide for production options |
-
-## Quick start (Windows, no Docker)
-
-Fastest path — fully native Windows (no pgvector compilation required, using our optimized in-memory NumPy vector search):
-
-```powershell
-# 1. Create Database & User
-# Open PowerShell and run:
-psql -U postgres
-# Paste these commands inside the psql prompt:
-CREATE ROLE sentinelai WITH LOGIN PASSWORD 'sentinelai';
-CREATE DATABASE sentinelai OWNER sentinelai;
-\q
-
-# 2. Setup Backend
-cd backend
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-# Install torch (CPU version is recommended to avoid massive GPU download timeouts)
-pip install torch --index-url https://download.pytorch.org/whl/cpu --no-cache-dir
-pip install -r requirements.txt
-# Copy environment variables & seed database (skips alembic migrations, creates all tables instantly!)
-copy .env.example .env
-python ..\scripts\seed_db.py
-uvicorn app.main:app --reload
-
-# 3. Setup Dashboard (in a second terminal)
-cd dashboard
-copy .env.example .env
-npm install
-npm run dev
-
-# 4. Setup Extension (in a third terminal)
-cd extension
-npm install
-npm run build
-```
-
-- Dashboard: **http://localhost:5173** — log in with `demo@sentinelai.io` / `SentinelDemo123!`
-- API docs: **http://localhost:8000/docs**
-
-Then load the browser extension:
-Open `chrome://extensions` → enable Developer mode → **Load unpacked** → select `extension/dist/`.
-
-Full walkthrough: **[docs/INSTALLATION.md](docs/INSTALLATION.md)**.
+- **Investigates, it doesn't just classify.** The agent decides for itself which tools to call and how deep to
+  go — a page that looks fine after one look gets a quick "safe"; a page with a login form on an unfamiliar
+  domain gets a screenshot, a WHOIS/VirusTotal check, a model score, and sometimes a second look at a suspicious
+  link found on the page, before it answers.
+- **Explains itself.** Every verdict is a few plain sentences citing what the tools actually showed — not just a
+  score.
+- **Catches brand impersonation.** If a domain embeds a well-known brand name in a way that isn't that brand's
+  real site (`wmw-google-com.loca.lt`), the agent searches for the real company and surfaces its actual site(s)
+  alongside the verdict.
+- **Every check is recorded.** A local SQLite history + a per-case markdown report (screenshot, redirect chain,
+  every tool call) — browsable from the web UI or `GET /runs`.
 
 ## How it works
 
+```mermaid
+flowchart LR
+    subgraph Entry["Entry points"]
+        EXT["Chrome Extension\n(popup)"]
+        UI["Web UI\n(history + reports)"]
+        CLI["cli.py\n(terminal)"]
+    end
+
+    EXT -- "POST /check-links\nPOST /check-email" --> API
+    UI -- "POST /check-links" --> API
+    CLI --> RUN
+
+    API["FastAPI\n(backend/api/)"] --> RUN["run_case_traced()"]
+
+    subgraph Agent["LangGraph agent (backend/agent/)"]
+        direction TB
+        ROUTER["router_node\nblocklist + 24h cache"]
+        AGENT_N["agent_node\nGroq LLM picks the next tool"]
+        TOOLS["tools\n(ToolNode)"]
+        OUTPUT["output_node\nparse VERDICT / REASON / ...\nwrite cache"]
+
+        ROUTER -- "cache/blocklist hit" --> OUTPUT
+        ROUTER -- "unresolved" --> AGENT_N
+        AGENT_N -- "tool call" --> TOOLS
+        TOOLS -- "result" --> AGENT_N
+        AGENT_N -- "final answer, no tool calls" --> OUTPUT
+    end
+
+    RUN --> ROUTER
+
+    TOOLS -.-> T1["inspect_website\nheadless Chromium sandbox"]
+    TOOLS -.-> T2["domain_reputation\nWHOIS + VirusTotal"]
+    TOOLS -.-> T3["content_classifier\nONNX URL model /\nBERT text model"]
+    TOOLS -.-> T4["web_search\nDuckDuckGo, keyless"]
+
+    OUTPUT --> HIST[("history.db +\nmarkdown report")]
+    OUTPUT --> VERDICT["Verdict\nlabel, confidence, reason,\nlegitimate_alternatives"]
+    VERDICT --> EXT
+    VERDICT --> UI
+    VERDICT --> CLI
 ```
-Extension observes browser events
-        → FastAPI ingests them
-        → Threat Intelligence lookup (VirusTotal / AbuseIPDB / PhishTank, cached)
-        → DistilBERT phishing classification
-        → Isolation Forest anomaly detection (network flows)
-        → Threat Correlation Engine fuses signals into ONE Incident
-        → MITRE ATT&CK mapping
-        → RAG retrieves the matching playbook (pgvector)
-        → Gemini generates a plain-English explanation + remediation plan
-        → Dashboard updates in real time
+
+Full breakdown of every file: [backend/README.md](backend/README.md).
+
+## Quick start
+
+```bash
+git clone https://github.com/VatsalMehta-0523/sentinelai-cyber-security.git
+cd sentinelai-cyber-security
+./download_everything.bash    # one-time: venv, Python deps, Playwright's Chromium,
+                               # warms the ML model cache, extension npm install + build
 ```
 
-Full breakdown, including how each signal maps to code: **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**.
+Fill in `backend/.env` — at minimum `GROQ_API_KEY` (free, see below):
 
-## Documentation
+```bash
+$EDITOR backend/.env
+```
 
-| Doc | Covers |
-|---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | System design, the Threat Correlation Engine, ML pipelines, RAG/LLM, database design rationale |
-| [docs/API.md](docs/API.md) | Every endpoint, request/response shapes |
-| [docs/INSTALLATION.md](docs/INSTALLATION.md) | Windows setup (WSL2 or fully native), GPU/PyTorch setup, verifying everything works |
-| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Production checklist, scaling, PaaS deployment |
-| [docs/DEVELOPER_GUIDE.md](docs/DEVELOPER_GUIDE.md) | Codebase layout, design system, how to extend it |
-| [docs/TESTING.md](docs/TESTING.md) | Running the test suite (backend pytest, frontend build/typecheck) |
-| [docs/FOLDER_STRUCTURE.md](docs/FOLDER_STRUCTURE.md) | Annotated full file tree |
-| [extension/README.md](extension/README.md) | Extension-specific build/load instructions |
+Then start the backend:
+
+```bash
+./start_all.bash               # defaults to http://127.0.0.1:8010
+```
+
+Open **http://127.0.0.1:8010/** for the history/report UI, or use the CLI:
+
+```bash
+cd backend && source .venv/bin/activate
+python cli.py link https://example.com
+python cli.py email    # paste text, then Ctrl-D
+```
+
+**API keys:**
+- `GROQ_API_KEY` — required, the agent's LLM. Free tier: https://console.groq.com/keys
+- `VT_API_KEY` — optional, VirusTotal lookups in `domain_reputation`. Degrades gracefully if unset. Free:
+  https://www.virustotal.com/gui/join-us
+
+### Manual setup (if you'd rather not run the scripts)
+
+```bash
+cd backend
+python3 -m venv .venv && source .venv/bin/activate
+pip install torch --index-url https://download.pytorch.org/whl/cpu   # or the cu128 index for a CUDA GPU
+pip install -r requirements.txt
+playwright install chromium
+cp .env.example .env   # then fill in GROQ_API_KEY
+uvicorn api.app:app --reload --port 8010
+```
+
+## Load the Chrome extension
+
+1. Make sure the backend is running first (`./start_all.bash`, or the manual steps above).
+2. `cd extension && npm install && npm run build` (already done for you by `download_everything.bash`).
+3. Open `chrome://extensions`, enable **Developer mode** (top right).
+4. Click **Load unpacked**, select `extension/dist/`.
+5. On any `http(s)://` page, click the security-copilot icon in the toolbar:
+   - **Check this URL** — checks the current page's URL.
+   - **Check page text** — grabs the visible page text and checks it (works on any webapp — an email client, a
+     login page, anything with text on screen).
+6. Click **Full report** on a verdict to open it in the web UI (screenshot, redirect chain, every tool call).
+
+There's no sign-in and nothing runs automatically in the background — every check is a deliberate click. If your
+backend isn't on `http://127.0.0.1:8010`, change it in the extension's Settings (gear icon in the popup).
+Extension-specific details: [extension/README.md](extension/README.md).
 
 ## Repository layout
 
 ```
-backend/    dashboard/    extension/    shared/    database/    scripts/    docs/
+backend/        FastAPI + LangGraph agent. Flat, one file per concern — see backend/README.md for the full tree.
+extension/      Chrome MV3 extension (React popup + options page, no background worker, no content script).
+native-host/    Native messaging host for OS-level network monitoring — templates/stubs only, not built yet.
+scripts/        One-off utilities (e.g. training the network-anomaly Isolation Forest model).
+download_everything.bash   One-time setup: venv, deps, Playwright, ML model cache, extension build.
+start_all.bash              Starts the backend (port-safe — refuses to clobber something already listening).
 ```
-
-See [docs/FOLDER_STRUCTURE.md](docs/FOLDER_STRUCTURE.md) for the annotated version.
-
-## Verified to work
-
-This isn't a scaffold — every piece was exercised before being called done:
-
-- All 9 database tables compile to valid PostgreSQL DDL (`database/schema.sql`, generated from the same ORM
-  models the app runs on).
-- A real Isolation Forest model was trained on the bundled sample dataset and verified to score DDoS-like
-  traffic higher than normal traffic.
-- The phishing heuristic fallback correctly separates a legitimate URL from a brand-impersonation phishing URL
-  (the primary path uses the real DistilBERT model when `torch`/`transformers` are installed).
-- The Threat Correlation Engine reproduces the exact worked example from the product spec: a phishing URL +
-  credential-form submission correlates into one incident titled *"Credential Theft Attempt"*.
-- Backend: 13 unit tests pass; 9 database integration tests are included and run against a real Postgres (see
-  [docs/TESTING.md](docs/TESTING.md)).
-- Dashboard and extension both build cleanly with `npm run build` under TypeScript strict mode, zero errors.
 
 ## Status
 
-MVP-complete per the architecture document's Definition of Done (section 22): extension authenticates, events
-reach the backend, DistilBERT detects phishing, Isolation Forest detects anomalies, the Threat Correlation
-Engine creates incidents, the dashboard displays them, MITRE mapping works, RAG returns playbooks, and Gemini
-explains the threat.
+**Real and tested end-to-end:** the agent (all 4 tools), the router's blocklist/cache fast path, the CLI, the
+FastAPI + web UI, run history + markdown reports, and the Chrome extension — all verified against live services
+(Groq, VirusTotal, WHOIS, DuckDuckGo, real phishing test sites) and, for the extension, loaded into real Chrome.
 
-**Deferred to post-MVP** (per the spec's explicit "Future" section): AI Incident Timeline, Attack Replay, Threat
-Graph, AI Investigation Mode, Executive Reports.
+**Stubbed / not built yet:**
+- `backend/network/` — network-flow anomaly detection (Isolation Forest is ported and working but not yet tuned
+  to the original spec exactly; flow collection and TranAD are stubs).
+- `backend/mitre/` — MITRE ATT&CK technique lookup + remediation text. Callable, always returns `None` for now.
+- `native-host/` — OS-level network monitoring via a native messaging host. Templates only.
+
+Every stub says so in its own module docstring.
 
 ## License
 

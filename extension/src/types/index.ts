@@ -1,22 +1,23 @@
-export interface PhishingCheckResult {
+/** Mirrors backend/agent/state.py's Verdict TypedDict, plus the run_id
+ * every route in backend/api/routes_check_*.py adds on top of it. */
+export interface LegitimateAlternative {
+  title: string;
   url: string;
-  is_phishing: boolean;
+}
+
+export interface Verdict {
+  label: "dangerous" | "suspicious" | "safe" | "inconclusive";
   confidence: number;
-  risk_label: "low" | "medium" | "high";
-  reasons: string[];
-  threat_intel_hit: boolean;
-  incident_id: string | null;
+  reason: string;
+  mitigation: string | null;
+  legitimate_alternatives: LegitimateAlternative[];
+  run_id: string;
 }
 
-export interface EventIngestResponse {
-  accepted: number;
-  incident_id: string | null;
-  incident_created: boolean;
+/** POST /check-links response (api/schemas.py::CheckLinksResponse) — keyed by the URL that was submitted. */
+export interface CheckLinksResponse {
+  results: Record<string, Verdict>;
 }
 
-/** Messages passed between the content script, background service
- * worker, and popup/options UI via chrome.runtime messaging. */
-export type RuntimeMessage =
-  | { type: "FORM_SUBMISSION"; url: string; hasPasswordField: boolean }
-  | { type: "GET_ACTIVE_TAB_VERDICT" }
-  | { type: "AUTH_STATE_CHANGED" };
+/** POST /check-email returns a bare Verdict (api/routes_check_email.py). */
+export type CheckEmailResponse = Verdict;

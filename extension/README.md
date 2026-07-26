@@ -1,24 +1,30 @@
-# SentinelAI Browser Extension
+# security-copilot browser extension
 
-Chrome Manifest V3 extension: the telemetry source for SentinelAI (architecture doc section 7). It does **not**
-run any AI models itself — it collects events and renders the popup; the backend performs all intelligence.
+Chrome Manifest V3 extension for the security-copilot agent (`backend/`). It does **not** run any AI models or
+sandboxing itself — it's a thin, on-demand trigger: click the toolbar icon, click a button, get a verdict. The
+backend performs all the investigation (headless browser, WHOIS/VirusTotal, an LLM, web search).
+
+There is no auth and nothing runs automatically in the background — see `backend/README.md`'s POC scope for why
+(no DB beyond SQLite, no auth, terminal-first). Every check is a deliberate click.
 
 ## What it does
 
-- **Background service worker** (`src/background/`) — watches top-level navigations and submits each URL to
-  `POST /phishing/check`; watches downloads and reports them as events; relays form-submission signals from the
-  content script; sends a periodic device heartbeat.
-- **Content script** (`src/content/`) — a small, dependency-free script that detects password-field form
-  submissions and messages the background worker (never talks to the backend directly).
-- **Popup** (`src/popup/`) — shows the current tab's risk verdict with **View Details / Report / Continue /
-  Leave Site** actions when a threat is detected, or a calm "No threats detected" state otherwise.
-- **Options page** (`src/options/`) — sign in / create an account, and configure the backend API URL.
+- **Popup** (`src/popup/`) — two buttons on the current tab: **Check this URL** (`POST /check-links`) and
+  **Check page text** (grabs `document.body.innerText` via `chrome.scripting`, then `POST /check-email`). Shows
+  the verdict (label, confidence, reason, mitigation, and — if the agent suspected brand impersonation — links to
+  the real site), badges the tab icon (red `!` for dangerous, orange `!` for suspicious), and links out to the
+  full report in the backend's UI.
+- **Options page** (`src/options/`) — the one setting: the backend's base URL (defaults to
+  `http://127.0.0.1:8010`, matching `backend/README.md`).
+
+There is no background service worker and no content script injected into every page — `chrome.scripting`
+(triggered from the popup, covered by the `activeTab` permission granted when you click the toolbar icon) reads
+the active tab's text on demand instead.
 
 ## Setup
 
 ```bash
 cd extension
-cp .env.example .env   # documents the default API URL; the real setting lives in the Options page at runtime
 npm install
 npm run build
 ```
@@ -27,13 +33,15 @@ This produces a complete unpacked extension in `extension/dist/`.
 
 ## Load into Chrome
 
-1. Open `chrome://extensions`.
-2. Enable **Developer mode** (top right).
-3. Click **Load unpacked** and select `extension/dist/`.
-4. Click the SentinelAI icon in the toolbar, then **New here? Create an account in Settings** (or sign in if
-   you've already run `python scripts/seed_db.py`, using `demo@sentinelai.io` / `SentinelDemo123!`).
-5. By default the extension talks to `http://localhost:8000/api/v1` — change this on the Options page if your
-   backend runs elsewhere.
+1. Make sure the backend is running first (`cd backend && uvicorn api.app:app --port 8010` — see
+   `backend/README.md`).
+2. Open `chrome://extensions`.
+3. Enable **Developer mode** (top right).
+4. Click **Load unpacked** and select `extension/dist/`.
+5. Click the security-copilot icon in the toolbar on any `http(s)://` page and use **Check this URL** or
+   **Check page text**.
+6. If your backend isn't on `http://127.0.0.1:8010`, open the extension's **Settings** (gear icon in the popup,
+   or right-click the toolbar icon → Options) and change the URL.
 
 ## Development
 
@@ -44,12 +52,6 @@ npm run typecheck  # strict TypeScript check, no build
 
 ## Build architecture
 
-Two separate Vite build passes (see `vite.config.ts` / `vite.content.config.ts`):
-
-1. **Main pass** — popup + options (React, multi-page) and the background service worker, all as ES modules
-   (MV3 supports `"type": "module"` service workers).
-2. **Content-script pass** — bundled separately as a dependency-free IIFE for maximum browser compatibility,
-   since content scripts are injected as classic scripts.
-
+One Vite build pass (`vite.config.ts`) compiles the popup and options pages (React, multi-page) as ES modules.
 `scripts/copy-assets.mjs` flattens Vite's nested HTML output to `popup.html` / `options.html` at the root of
 `dist/` (matching `manifest.json`) and copies in `manifest.json` + icons.

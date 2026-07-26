@@ -1,34 +1,43 @@
 # --- Web framework -----------------------------------------------------
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-python-multipart==0.0.20
 
 # --- Settings / validation -----------------------------------------------------
 pydantic==2.10.4
 pydantic-settings==2.7.1
-email-validator==2.2.0
-
-# --- Database -----------------------------------------------------
-sqlalchemy==2.0.36
-asyncpg==0.30.0
-psycopg2-binary==2.9.10
-alembic==1.14.0
-
-
-# --- Auth / security -----------------------------------------------------
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-bcrypt==4.2.1
 
 # --- HTTP client (threat intel) -----------------------------------------------------
 httpx==0.28.1
 
-# --- Machine learning -----------------------------------------------------
-# IMPORTANT: torch is intentionally NOT listed here. Install it yourself
-# FIRST, with the command matching your hardware, then run
-# `pip install -r requirements.txt` for everything else. See
-# docs/INSTALLATION.md ("PyTorch / GPU setup") for exact commands,
-# including the NVIDIA RTX 50-series (Blackwell / CUDA 12.8) case.
+# --- Agent orchestration (spec section 2) -----------------------------------------------------
+# The versions below are what's actually installed and verified working
+# (see security-copilot-verified-working memory) — the first pins tried
+# here (langgraph==0.2.62 etc.) had a real dependency conflict with
+# langchain-groq and were never actually installed; pip resolved these
+# newer versions instead when left unpinned, and they work.
+langgraph==1.2.9
+langchain-core==1.5.1
+langchain-groq==1.1.3
+
+# --- Tool: inspect_website (spec section 4.1) -----------------------------------------------------
+playwright==1.49.1
+
+# --- Tool: domain_reputation (spec section 4.2) -----------------------------------------------------
+python-whois==0.9.5
+
+# --- Tool: content_classifier (spec section 4.3) -----------------------------------------------------
+onnxruntime==1.20.1
+huggingface_hub==0.27.1
+
+# --- Tool: web_search (not in the original spec — added 2026-07-25) -----------------------------------------------------
+# Keyless DuckDuckGo search, no signup.
+ddgs==9.14.4
+
+# --- Machine learning (network anomaly + BERT content classifier) -----------------------------------------------------
+# IMPORTANT: torch is intentionally NOT listed here — required by
+# transformers for the ealvaradob BERT model. Install it yourself FIRST,
+# with the command matching your hardware, then run
+# `pip install -r requirements.txt` for everything else.
 #   CPU only:   pip install torch
 #   NVIDIA GPU: pip install torch --index-url https://download.pytorch.org/whl/cu128
 transformers==4.47.1
@@ -37,13 +46,15 @@ numpy==2.2.1
 joblib==1.4.2
 pandas==2.2.3
 
-# --- LLM / RAG (Gemini) -----------------------------------------------------
-google-genai==1.2.0
-
 # --- Logging / utils -----------------------------------------------------
 python-dotenv==1.0.1
 
 # --- Testing -----------------------------------------------------
 pytest==8.3.4
 pytest-asyncio==0.25.0
-aiosqlite==0.20.0
+
+# --- NOTE -----------------------------------------------------
+# `psutil` (network/flow_collector.py) and a vector-index lib
+# (mitre/build_index.py — faiss or plain numpy is enough) aren't listed
+# yet because those modules are still stubs (spec sections 5.1, 6). Add
+# them when those files get built out (spec section 15, steps 8 and 11).

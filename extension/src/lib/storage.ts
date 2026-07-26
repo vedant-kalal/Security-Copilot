@@ -1,45 +1,38 @@
 /**
  * Typed wrapper around `chrome.storage.local`, used instead of
- * `localStorage` because service workers and content scripts do not
- * have access to `window.localStorage`.
+ * `localStorage` because service workers and popup/options pages do not
+ * share a single `window`. The backend has no auth (see
+ * backend/README.md — POC scope), so the only durable setting is where
+ * the backend lives.
  */
-export interface SentinelStorage {
+export interface CopilotStorage {
   apiBaseUrl: string;
-  accessToken: string | null;
-  refreshToken: string | null;
-  userEmail: string | null;
-  deviceId: string | null;
 }
 
-const DEFAULTS: SentinelStorage = {
-  apiBaseUrl: "http://localhost:8000/api/v1",
-  accessToken: null,
-  refreshToken: null,
-  userEmail: null,
-  deviceId: null,
+const DEFAULTS: CopilotStorage = {
+  apiBaseUrl: "http://127.0.0.1:8010",
 };
 
-export async function getStorage(): Promise<SentinelStorage> {
+export async function getStorage(): Promise<CopilotStorage> {
   const stored = await chrome.storage.local.get(Object.keys(DEFAULTS));
-  return { ...DEFAULTS, ...stored } as SentinelStorage;
+  return { ...DEFAULTS, ...stored } as CopilotStorage;
 }
 
-export async function setStorage(partial: Partial<SentinelStorage>): Promise<void> {
+export async function setStorage(partial: Partial<CopilotStorage>): Promise<void> {
   await chrome.storage.local.set(partial);
 }
 
-export async function clearAuth(): Promise<void> {
-  await chrome.storage.local.remove(["accessToken", "refreshToken", "userEmail", "deviceId"]);
-}
-
-/** Per-tab phishing verdicts, kept in session storage (cleared on browser restart). */
+/** Per-tab last verdict, kept in session storage (cleared on browser restart)
+ * so re-opening the popup on the same tab doesn't re-run a check. */
 export interface TabVerdict {
-  url: string;
-  isPhishing: boolean;
+  checkedUrl: string;
+  kind: "link" | "email";
+  label: "dangerous" | "suspicious" | "safe" | "inconclusive";
   confidence: number;
-  riskLabel: "low" | "medium" | "high";
-  reasons: string[];
-  incidentId: string | null;
+  reason: string;
+  mitigation: string | null;
+  legitimateAlternatives: { title: string; url: string }[];
+  runId: string | null;
   checkedAt: number;
 }
 
@@ -50,4 +43,8 @@ export async function setTabVerdict(tabId: number, verdict: TabVerdict): Promise
 export async function getTabVerdict(tabId: number): Promise<TabVerdict | null> {
   const result = await chrome.storage.session.get(`tab_verdict_${tabId}`);
   return (result[`tab_verdict_${tabId}`] as TabVerdict | undefined) ?? null;
+}
+
+export async function clearTabVerdict(tabId: number): Promise<void> {
+  await chrome.storage.session.remove(`tab_verdict_${tabId}`);
 }

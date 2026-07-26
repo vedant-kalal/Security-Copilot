@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>security-copilot</title>
+<style>
+  :root {
+    --bg: #0f1115; --panel: #171a21; --border: #2a2e38; --text: #e6e8ec; --muted: #8b90a0;
+    --dangerous: #ef4444; --suspicious: #f59e0b; --safe: #22c55e; --inconclusive: #8b90a0;
+    --accent: #6366f1;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  .app { display: flex; height: 100vh; }
+  .sidebar { width: 360px; flex-shrink: 0; border-right: 1px solid var(--border); display: flex; flex-direction: column; }
+  .sidebar h1 { font-size: 15px; padding: 16px; margin: 0; border-bottom: 1px solid var(--border); letter-spacing: 0.02em; }
+  #submit-form { display: flex; gap: 6px; padding: 12px; border-bottom: 1px solid var(--border); }
+  #url-input { flex: 1; background: var(--panel); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 8px 10px; font-size: 13px; }
+  #submit-form button { background: var(--accent); color: white; border: none; border-radius: 6px; padding: 8px 14px; font-size: 13px; cursor: pointer; }
+  #submit-form button:disabled { opacity: 0.5; cursor: default; }
+  #history-list { overflow-y: auto; flex: 1; }
+  .run-item { padding: 12px 16px; border-bottom: 1px solid var(--border); cursor: pointer; }
+  .run-item:hover { background: var(--panel); }
+  .run-item.active { background: var(--panel); border-left: 3px solid var(--accent); }
+  .run-item .input { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .run-item .meta { display: flex; justify-content: space-between; margin-top: 4px; }
+  .run-item .time { font-size: 11px; color: var(--muted); }
+  .badge { font-size: 10px; font-weight: 600; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; letter-spacing: 0.03em; }
+  .badge.dangerous { background: rgba(239,68,68,0.15); color: var(--dangerous); }
+  .badge.suspicious { background: rgba(245,158,11,0.15); color: var(--suspicious); }
+  .badge.safe { background: rgba(34,197,94,0.15); color: var(--safe); }
+  .badge.inconclusive { background: rgba(139,144,160,0.15); color: var(--inconclusive); }
+  main { flex: 1; overflow-y: auto; padding: 28px 36px; }
+  .empty-state { color: var(--muted); }
+  .verdict-card { border: 1px solid var(--border); border-radius: 10px; padding: 18px 20px; margin-bottom: 24px; }
+  .verdict-card h2 { margin: 0 0 8px; font-size: 13px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; }
+  .verdict-card .label-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .verdict-card .label-row .badge { font-size: 13px; padding: 4px 12px; }
+  .verdict-card .confidence { color: var(--muted); font-size: 13px; }
+  .verdict-card .reason { line-height: 1.5; }
+  .verdict-card .mitigation { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--muted); }
+  .verdict-card .alternatives { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--border); }
+  .verdict-card .alternatives .label { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+  .verdict-card .alternatives a { display: block; color: var(--accent); text-decoration: none; font-size: 13px; margin-bottom: 4px; }
+  .verdict-card .alternatives a:hover { text-decoration: underline; }
+  .link-item a { color: var(--accent); text-decoration: none; }
+  .link-item a:hover { text-decoration: underline; }
+  .tool-call { border: 1px solid var(--border); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
+  .tool-call h3 { margin: 0 0 12px; font-size: 13px; font-family: monospace; color: var(--accent); }
+  .field { margin-bottom: 8px; font-size: 13px; }
+  .field b { color: var(--muted); font-weight: 500; }
+  .field code { background: var(--panel); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
+  .redirect-hop { font-family: monospace; font-size: 12px; margin-left: 12px; color: var(--muted); }
+  .form-item, .link-item { font-family: monospace; font-size: 12px; margin-left: 12px; color: var(--muted); }
+  .page-text { background: var(--panel); border-radius: 6px; padding: 10px 12px; font-size: 12px; white-space: pre-wrap; max-height: 200px; overflow-y: auto; margin-top: 6px; }
+  .screenshot { max-width: 100%; border-radius: 8px; border: 1px solid var(--border); margin-top: 8px; }
+  #status-line { padding: 8px 16px; font-size: 12px; color: var(--muted); min-height: 16px; }
+</style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <h1>security-copilot</h1>
+      <form id="submit-form">
+        <input id="url-input" placeholder="Paste a URL to check..." autocomplete="off" />
+        <button type="submit" id="submit-btn">Check</button>
+      </form>
+      <div id="status-line"></div>
+      <div id="history-list"></div>
+    </aside>
+    <main id="detail-pane">
+      <p class="empty-state">Select a run from the left, or submit a new URL above.</p>
+    </main>
+  </div>
+
+<script>
+const historyList = document.getElementById('history-list');
+const detailPane = document.getElementById('detail-pane');
+const statusLine = document.getElementById('status-line');
+const form = document.getElementById('submit-form');
+const urlInput = document.getElementById('url-input');
+const submitBtn = document.getElementById('submit-btn');
+
+let activeRunId = null;
+
+function fmtTime(epochSeconds) {
+  return new Date(epochSeconds * 1000).toLocaleString();
+}
+
+function badge(label) {
+  return `<span class="badge ${label}">${label}</span>`;
+}
+
+async function loadHistory() {
+  const res = await fetch('/runs?limit=100');
+  const runs = await res.json();
+  historyList.innerHTML = runs.map(r => `
+    <div class="run-item ${r.id === activeRunId ? 'active' : ''}" data-id="${r.id}">
+      <div class="input">${escapeHtml(r.raw_input)}</div>
+      <div class="meta">
+        ${badge(r.verdict.label)}
+        <span class="time">${fmtTime(r.created_at)}</span>
+      </div>
+    </div>
+  `).join('') || '<p class="empty-state" style="padding:16px;">No runs yet.</p>';
+
+  historyList.querySelectorAll('.run-item').forEach(el => {
+    el.addEventListener('click', () => showRun(el.dataset.id));
+  });
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+function screenshotUrl(path) {
+  if (!path) return null;
+  const filename = path.split('/').pop();
+  return `/screenshots/${filename}`;
+}
+
+function renderInspectWebsite(a) {
+  let html = '';
+  html += `<div class="field"><b>Final URL:</b> <code>${escapeHtml(a.final_url)}</code></div>`;
+  if (a.status_code != null) html += `<div class="field"><b>Status:</b> ${a.status_code}</div>`;
+  if (a.navigation_error) html += `<div class="field"><b>Navigation failed:</b> ${escapeHtml(a.navigation_error)}</div>`;
+  if (a.error) html += `<div class="field"><b>Error:</b> ${escapeHtml(a.error)}</div>`;
+
+  const chain = a.redirect_chain || [];
+  if (chain.length > 1) {
+    html += `<div class="field"><b>Redirect chain (${chain.length} hops):</b></div>`;
+    chain.forEach((hop, i) => { html += `<div class="redirect-hop">${i + 1}. ${escapeHtml(hop.url)} &rarr; ${hop.status}</div>`; });
+  }
+
+  const forms = a.forms || [];
+  html += `<div class="field"><b>Forms found:</b> ${forms.length || 'none'}</div>`;
+  forms.forEach(f => {
+    html += `<div class="form-item">submits to ${escapeHtml(f.action)} (${f.has_password_field ? 'has a password field' : 'no password field'})</div>`;
+  });
+
+  const links = a.links || [];
+  if (links.length) {
+    html += `<div class="field" style="margin-top:8px;"><b>Links found:</b> ${links.length}</div>`;
+    links.slice(0, 10).forEach(l => {
+      html += `<div class="link-item">${l.same_origin ? '(same-origin)' : '(cross-origin)'} ${escapeHtml(l.href)}</div>`;
+    });
+    if (links.length > 10) html += `<div class="link-item">... and ${links.length - 10} more</div>`;
+  }
+
+  if (a.page_text) {
+    html += `<div class="field" style="margin-top:8px;"><b>Page text (excerpt):</b></div><div class="page-text">${escapeHtml(a.page_text.slice(0, 1500))}</div>`;
+  }
+
+  return html;
+}
+
+function renderDomainReputation(a) {
+  let html = `<div class="field"><b>Domain:</b> <code>${escapeHtml(a.domain)}</code></div>`;
+  const whois = a.whois || {};
+  html += `<div class="field"><b>WHOIS:</b> ${escapeHtml(whois.detail)}</div>`;
+  const vt = a.virustotal || {};
+  if (vt.available) {
+    html += `<div class="field"><b>VirusTotal:</b> ${vt.malicious_count} malicious, ${vt.suspicious_count} suspicious, ${vt.harmless_count} harmless (reputation ${vt.reputation_score})</div>`;
+  } else {
+    html += `<div class="field"><b>VirusTotal:</b> unavailable (${escapeHtml(vt.detail)})</div>`;
+  }
+  return html;
+}
+
+function renderContentClassifier(a) {
+  if (a.error) return `<div class="field"><b>Error:</b> ${escapeHtml(a.error)}</div>`;
+  return `
+    <div class="field"><b>Model:</b> ${escapeHtml(a.model)}</div>
+    <div class="field"><b>Input type:</b> ${escapeHtml(a.input_type)}</div>
+    <div class="field"><b>Phishing score:</b> ${a.phishing_score}</div>
+    <div class="field"><b>Label:</b> ${escapeHtml(a.label)}</div>
+  `;
+}
+
+function renderWebSearch(a) {
+  if (!a.available) return `<div class="field"><b>Search unavailable:</b> ${escapeHtml(a.detail)}</div>`;
+  let html = `<div class="field"><b>Query:</b> ${escapeHtml(a.query)}</div>`;
+  (a.results || []).forEach(r => {
+    html += `<div class="link-item"><a href="${escapeHtml(r.url)}" target="_blank" rel="noopener">${escapeHtml(r.title)}</a></div>`;
+  });
+  return html;
+}
+
+const RENDERERS = {
+  inspect_website: renderInspectWebsite,
+  domain_reputation: renderDomainReputation,
+  content_classifier: renderContentClassifier,
+  web_search: renderWebSearch,
+};
+
+async function showRun(runId) {
+  activeRunId = runId;
+  document.querySelectorAll('.run-item').forEach(el => el.classList.toggle('active', el.dataset.id === runId));
+
+  const res = await fetch(`/runs/${runId}`);
+  if (!res.ok) { detailPane.innerHTML = '<p class="empty-state">Run not found.</p>'; return; }
+  const run = await res.json();
+  const v = run.verdict || {};
+  const alternatives = v.legitimate_alternatives || [];
+
+  let html = `
+    <div class="verdict-card">
+      <h2>${escapeHtml(run.case_type)} &middot; ${fmtTime(run.created_at)}</h2>
+      <div class="label-row">${badge(v.label || 'inconclusive')} <span class="confidence">confidence ${v.confidence}</span></div>
+      <div class="reason">${escapeHtml(v.reason)}</div>
+      ${v.mitigation ? `<div class="mitigation">${escapeHtml(v.mitigation)}</div>` : ''}
+      ${alternatives.length ? `
+        <div class="alternatives">
+          <div class="label">This might be an impersonation of:</div>
+          ${alternatives.map(a => `<a href="${escapeHtml(a.url)}" target="_blank" rel="noopener">${escapeHtml(a.title)}</a>`).join('')}
+        </div>
+      ` : ''}
+    </div>
+    <div class="field" style="margin-bottom:20px; word-break: break-all;"><b>Input:</b> ${escapeHtml(run.raw_input)}</div>
+  `;
+
+  const calls = run.tool_calls || [];
+  if (!calls.length) {
+    html += '<p class="empty-state">Resolved by the router\'s fast path (blocklist/cache) &mdash; no tools were called.</p>';
+  } else {
+    calls.forEach((call, i) => {
+      const argsStr = Object.entries(call.args || {}).map(([k, v2]) => `${k}=${JSON.stringify(v2)}`).join(', ');
+      const renderer = RENDERERS[call.tool];
+      html += `<div class="tool-call"><h3>${i + 1}. ${escapeHtml(call.tool)}(${escapeHtml(argsStr)})</h3>`;
+      html += renderer ? renderer(call.artifact || {}) : `<div class="field">${escapeHtml(JSON.stringify(call.artifact))}</div>`;
+      const shotUrl = screenshotUrl(call.screenshot_path);
+      if (shotUrl) html += `<img class="screenshot" src="${shotUrl}" alt="screenshot" />`;
+      html += `</div>`;
+    });
+  }
+
+  detailPane.innerHTML = html;
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = urlInput.value.trim();
+  if (!url) return;
+
+  submitBtn.disabled = true;
+  statusLine.textContent = `Investigating ${url} — this can take 10-30s...`;
+
+  try {
+    const res = await fetch('/check-links', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ urls: [url] }),
+    });
+    const data = await res.json();
+    const result = data.results[url];
+    statusLine.textContent = result ? `Done: ${result.label}` : 'Done.';
+    urlInput.value = '';
+    await loadHistory();
+    if (result && result.run_id) showRun(result.run_id);
+  } catch (err) {
+    statusLine.textContent = `Error: ${err}`;
+  } finally {
+    submitBtn.disabled = false;
+  }
+});
+
+const initialRunId = new URLSearchParams(location.search).get('run');
+loadHistory().then(() => { if (initialRunId) showRun(initialRunId); });
+</script>
+</body>
+</html>

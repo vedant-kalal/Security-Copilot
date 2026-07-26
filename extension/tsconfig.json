@@ -16,8 +16,7 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "types": ["chrome"],
-    "baseUrl": ".",
-    "paths": { "@/*": ["./src/*"] }
+    "paths": { "@/*": ["${configDir}/src/*"] }
   },
   "include": ["src"]
 }

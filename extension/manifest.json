@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "SentinelAI Security Copilot",
+  "name": "security-copilot",
   "version": "1.0.0",
-  "description": "Real-time phishing protection and browser telemetry for the SentinelAI AI Security Copilot.",
+  "description": "On-demand phishing checks for the current page or its text, backed by the security-copilot LangGraph agent.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -17,18 +17,7 @@
     }
   },
   "options_page": "options.html",
-  "background": {
-    "service_worker": "assets/background.js",
-    "type": "module"
-  },
-  "content_scripts": [
-    {
-      "matches": ["http://*/*", "https://*/*"],
-      "js": ["assets/content.js"],
-      "run_at": "document_idle"
-    }
-  ],
-  "permissions": ["storage", "tabs", "webNavigation", "downloads", "alarms", "notifications"],
-  "host_permissions": ["http://*/*", "https://*/*"],
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
   "minimum_chrome_version": "96"
 }
