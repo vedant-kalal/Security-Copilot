@@ -22,6 +22,11 @@ This is a from-scratch POC, not a production product — see [Status](#status) f
   alongside the verdict.
 - **Every check is recorded.** A local SQLite history + a per-case markdown report (screenshot, redirect chain,
   every tool call) — browsable from the web UI or `GET /runs`.
+- **Watches your network too.** A local helper aggregates this machine's connection metadata (never packet
+  contents) into 60-second windows and scores each with two unsupervised models — an Isolation Forest (single
+  window) and TranAD (the temporal sequence, catching beaconing / slow exfiltration a single window misses). A
+  flow that either model flags is mapped to the nearest MITRE ATT&CK technique (SecureBERT embeddings) and sent
+  through the *same* agent, so a suspicious flow gets the same explained verdict + remediation as a bad link.
 
 ## How it works
 
@@ -31,11 +36,13 @@ flowchart LR
         EXT["Chrome Extension\n(popup)"]
         UI["Web UI\n(history + reports)"]
         CLI["cli.py\n(terminal)"]
+        HOST["native-host/host.py\nflow collector +\nIsolation Forest + TranAD"]
     end
 
     EXT -- "POST /check-links\nPOST /check-email" --> API
     UI -- "POST /check-links" --> API
     CLI --> RUN
+    HOST -- "POST /report-flow\n(+ MITRE technique)" --> API
 
     API["FastAPI\n(backend/api/)"] --> RUN["run_case_traced()"]
 
@@ -71,24 +78,31 @@ Full breakdown of every file: [backend/README.md](backend/README.md).
 
 ## Quick start
 
+**1. Install** (one-time):
+
 ```bash
 git clone https://github.com/VatsalMehta-0523/sentinelai-cyber-security.git
 cd sentinelai-cyber-security
-./download_everything.bash    # one-time: venv, Python deps, Playwright's Chromium,
+./download_everything.bash    # venv, Python deps, Playwright's Chromium,
                                # warms the ML model cache, extension npm install + build
 ```
 
-Fill in `backend/.env` — at minimum `GROQ_API_KEY` (free, see below):
+**2. Add your keys** — edit `backend/.env`, set at least `GROQ_API_KEYS` (free, see below):
 
 ```bash
 $EDITOR backend/.env
 ```
 
-Then start the backend:
+**3. Run everything:**
 
 ```bash
-./start_all.bash               # defaults to http://127.0.0.1:8010
+./run_all.bash                 # backend + native network helper, on http://127.0.0.1:8010
 ```
+
+On its first run `run_all.bash` also trains the network-anomaly models and builds the MITRE ATT&CK index if
+they're missing (the index step downloads ~500MB once — see [below](#network-anomaly-detection-local-traffic)).
+Subsequent runs skip straight to launching the services. Prefer the backend alone (no live network monitoring)?
+Use the original `./start_all.bash`, or `WITH_NATIVE_HOST=0 ./run_all.bash`.
 
 Open **http://127.0.0.1:8010/** for the history/report UI, or use the CLI:
 
@@ -99,7 +113,9 @@ python cli.py email    # paste text, then Ctrl-D
 ```
 
 **API keys:**
-- `GROQ_API_KEY` — required, the agent's LLM. Free tier: https://console.groq.com/keys
+- `GROQ_API_KEYS` — required, the agent's LLM. One or more comma-separated free keys; the agent
+  rotates across them round-robin and fails over on rate limits (429). Free tier:
+  https://console.groq.com/keys (the legacy single `GROQ_API_KEY` still works if that's all you set)
 - `VT_API_KEY` — optional, VirusTotal lookups in `domain_reputation`. Degrades gracefully if unset. Free:
   https://www.virustotal.com/gui/join-us
 
@@ -111,9 +127,17 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install torch --index-url https://download.pytorch.org/whl/cpu   # or the cu128 index for a CUDA GPU
 pip install -r requirements.txt
 playwright install chromium
-cp .env.example .env   # then fill in GROQ_API_KEY
+cp .env.example .env   # then fill in GROQ_API_KEYS
 uvicorn api.app:app --reload --port 8010
 ```
+
+### Startup scripts, at a glance
+
+| Script | What it does |
+|---|---|
+| `download_everything.bash` | One-time setup: backend venv, Python deps, Chromium, ML model cache, extension build. |
+| `run_all.bash` | Starts **everything**: backend + native network helper. Trains models / builds the MITRE index on first run. |
+| `start_all.bash` | Starts **just the backend** (link/email agent + web UI). No network monitoring. |
 
 ## Load the Chrome extension
 
@@ -131,15 +155,76 @@ There's no sign-in and nothing runs automatically in the background — every ch
 backend isn't on `http://127.0.0.1:8010`, change it in the extension's Settings (gear icon in the popup).
 Extension-specific details: [extension/README.md](extension/README.md).
 
+## Network anomaly detection (local traffic)
+
+The native helper (`native-host/host.py`) is a plain long-running Python process — no Chrome native-messaging
+protocol, it just POSTs to the backend like everything else. Its loop:
+
+1. **Collect** (`backend/network/flow_collector.py`) — polls `psutil.net_connections` every ~2s, diffs snapshots,
+   and aggregates connection **metadata only** (never payloads) into 60-second feature-vector windows.
+2. **Score** — each window through two unsupervised models:
+   - **Isolation Forest** (`backend/network/isolation_forest.py`) — scores a single window; escalates above the
+     99th-percentile-of-normal threshold.
+   - **TranAD** (`backend/network/tranad.py`) — a transformer that scores the *sequence*, catching temporal
+     patterns (beaconing, slow exfiltration) whose individual windows look normal.
+   A window escalates if **either** model flags it.
+3. **Report** — the flow's description is mapped to the nearest MITRE ATT&CK technique
+   (`backend/mitre/lookup.py`, SecureBERT embeddings) and POSTed to `/report-flow`, which runs it through the
+   same agent and returns an explained verdict + remediation (curated playbook text where available).
+
+`run_all.bash` starts this helper for you. To run it on its own (backend must already be up):
+
+```bash
+cd backend && source .venv/bin/activate
+python ../native-host/host.py --backend-url http://127.0.0.1:8010
+```
+
+### Training the models / building the index
+
+`run_all.bash` does this automatically on first run; to (re)build them by hand:
+
+```bash
+cd backend && source .venv/bin/activate
+
+# Isolation Forest — per-row (labeled datasets) and windowed (live scoring):
+python ../scripts/train_isolation_forest.py                       # csv/per-row model
+python ../scripts/train_isolation_forest.py --feature-set window  # windowed model
+# TranAD temporal model:
+python ../scripts/train_tranad.py
+# MITRE ATT&CK index (SecureBERT embeddings — downloads ~500MB the first time):
+python -m mitre.build_index
+```
+
+The bundled sample CSVs (`backend/data/network_datasets/`) are 200-row smoke-test samples. For real detection
+quality, retrain against the full [CICIDS2017](https://www.unb.ca/cic/datasets/ids-2017.html) or
+[NSL-KDD](https://www.unb.ca/cic/datasets/nsl.html) via `--input <your.csv>`.
+
+### Demo triggers
+
+Generate a network anomaly on cue instead of waiting for real traffic to do something interesting:
+
+```bash
+# Guaranteed: POST one hand-crafted anomalous flow straight to /report-flow
+python scripts/staged_flow_trigger.py post --backend-url http://127.0.0.1:8010
+# Live: open a burst of failed outbound connections for the running helper to catch
+python scripts/staged_flow_trigger.py live
+# Replay pre-recorded CICIDS2017 attack flows through the pipeline
+python scripts/replay_attack_flow.py --backend-url http://127.0.0.1:8010
+```
+
 ## Repository layout
 
 ```
-backend/        FastAPI + LangGraph agent. Flat, one file per concern — see backend/README.md for the full tree.
+backend/        FastAPI + LangGraph agent, network models (network/), MITRE mapping (mitre/). Flat, one file
+                per concern — see backend/README.md for the full tree.
 extension/      Chrome MV3 extension (React popup + options page, no background worker, no content script).
-native-host/    Native messaging host for OS-level network monitoring — templates/stubs only, not built yet.
-scripts/        One-off utilities (e.g. training the network-anomaly Isolation Forest model).
+native-host/    The local network helper (host.py) — collects flows, scores with Isolation Forest + TranAD,
+                POSTs anomalies to /report-flow.
+scripts/        Utilities: train_isolation_forest.py, train_tranad.py, and the demo triggers
+                (staged_flow_trigger.py, replay_attack_flow.py).
 download_everything.bash   One-time setup: venv, deps, Playwright, ML model cache, extension build.
-start_all.bash              Starts the backend (port-safe — refuses to clobber something already listening).
+run_all.bash               Starts everything: backend + native helper (trains models / builds MITRE on 1st run).
+start_all.bash             Starts just the backend (port-safe — refuses to clobber something already listening).
 ```
 
 ## Status
@@ -148,13 +233,17 @@ start_all.bash              Starts the backend (port-safe — refuses to clobber
 FastAPI + web UI, run history + markdown reports, and the Chrome extension — all verified against live services
 (Groq, VirusTotal, WHOIS, DuckDuckGo, real phishing test sites) and, for the extension, loaded into real Chrome.
 
-**Stubbed / not built yet:**
-- `backend/network/` — network-flow anomaly detection (Isolation Forest is ported and working but not yet tuned
-  to the original spec exactly; flow collection and TranAD are stubs).
-- `backend/mitre/` — MITRE ATT&CK technique lookup + remediation text. Callable, always returns `None` for now.
-- `native-host/` — OS-level network monitoring via a native messaging host. Templates only.
+**Also built and verified:**
+- `backend/network/` — flow collection (`flow_collector.py`), the Isolation Forest (per-row + windowed, with a
+  persisted percentile threshold), and TranAD temporal detection. Verified: TranAD flags a synthetic
+  slow-exfiltration / beaconing sequence the Isolation Forest misses, with no false positives on normal traffic.
+- `backend/mitre/` — SecureBERT + MITRE ATT&CK index (`build_index.py`) and nearest-technique lookup
+  (`lookup.py`), with curated playbook remediation text preferred over raw STIX.
+- `native-host/host.py` — the local network helper, POSTing anomalies to `/report-flow`.
 
-Every stub says so in its own module docstring.
+**Not built (by design):** per-user personalization — periodically retraining the models on *your* logged
+traffic (excluding confirmed-malicious flows) instead of the public datasets. This is an ongoing task that only
+begins after the helper has been running for a few weeks; see the phased plan for details.
 
 ## License
 

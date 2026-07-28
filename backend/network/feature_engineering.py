@@ -7,15 +7,21 @@ export conventions, but every field has a sane default so the same
 function can featurize CSV-uploaded network logs, replayed dataset
 rows, or any dict with compatible keys.
 
-NOT YET REWORKED for spec section 5.1: these 10 features are shaped for
-labeled CICIDS2017/UNSW-NB15 CSV rows (bytes/packets/duration columns).
-The spec's live `flow_collector.py` (psutil-based) produces a different
-feature set per 60-second window — connection count, unique destination
-count, unique port count, failed/reset ratio, sin/cos hour-of-day,
-one-hot protocol. Kept here as a working reference for training on the
-bundled CICIDS2017 sample now; rewrite once `flow_collector.py` exists
-so both sides speak the same feature vector shape (see
-`isolation_forest.py`'s module docstring for the same note).
+Two feature sets live here, on purpose (they serve different jobs):
+
+  - `extract_features` / `FEATURE_NAMES` — the 10 CICIDS2017/UNSW-NB15
+    per-flow-row features (bytes/packets/duration columns). Used for
+    training and evaluating against *labeled datasets*.
+  - `extract_window_features` / `WINDOW_FEATURE_NAMES` — the 8 features
+    `network/flow_collector.py` emits per 60-second window (connection
+    count, unique destination/port counts, failed/reset ratio, sin/cos
+    hour-of-day, soft one-hot protocol). Used for *live scoring* of real
+    traffic on this machine.
+
+`isolation_forest.py` can train/score against either set (see its
+`feature_set` parameter); the two are kept separate because a
+dataset-trained per-row model and a live windowed model score
+fundamentally different shapes.
 """
 from __future__ import annotations
 
@@ -96,3 +102,50 @@ def extract_features(payload: Dict[str, Any]) -> List[float]:
 def feature_dict_to_vector(payload: Dict[str, Any]) -> Dict[str, float]:
     """Same as `extract_features` but returns a name->value mapping (useful for explanations)."""
     return dict(zip(FEATURE_NAMES, extract_features(payload)))
+
+
+# ---------------------------------------------------------------------------
+# Windowed feature set — matches network/flow_collector.py's per-window output.
+# ---------------------------------------------------------------------------
+
+WINDOW_FEATURE_NAMES: List[str] = [
+    "connection_count",
+    "unique_destination_count",
+    "unique_port_count",
+    "failed_reset_ratio",
+    "hour_sin",
+    "hour_cos",
+    "proto_tcp",
+    "proto_udp",
+]
+
+# Defaults describe a quiet-but-plausible window, used only when a key is
+# missing (the live collector always supplies all of them).
+_WINDOW_DEFAULTS: Dict[str, float] = {
+    "connection_count": 10.0,
+    "unique_destination_count": 5.0,
+    "unique_port_count": 3.0,
+    "failed_reset_ratio": 0.02,
+    "hour_sin": 0.0,
+    "hour_cos": 1.0,
+    "proto_tcp": 1.0,
+    "proto_udp": 0.0,
+}
+
+
+def extract_window_features(window: Dict[str, Any]) -> List[float]:
+    """Convert one `flow_collector.collect_flows()` window dict into a vector.
+
+    Reads the feature keys off the top level of the window dict (ignoring its
+    `meta` block), coercing/defaulting anything missing so a malformed window
+    can't crash scoring.
+    """
+    return [_coerce_float(window.get(name), _WINDOW_DEFAULTS[name]) for name in WINDOW_FEATURE_NAMES]
+
+
+# Registry so isolation_forest.py can look up the right names/extractor by
+# feature-set key without duplicating the mapping.
+FEATURE_SETS: Dict[str, Dict[str, Any]] = {
+    "csv": {"names": FEATURE_NAMES, "extractor": extract_features},
+    "window": {"names": WINDOW_FEATURE_NAMES, "extractor": extract_window_features},
+}

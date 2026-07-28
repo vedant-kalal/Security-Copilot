@@ -21,6 +21,12 @@ dist-extension/
 
 # Model artifacts (large binary files — regenerate via scripts/train_isolation_forest.py)
 backend/model_artifacts/*.joblib
+backend/model_artifacts/*.pt
+backend/model_artifacts/*.threshold.json
+
+# MITRE ATT&CK index (regenerate via `python -m mitre.build_index`):
+# the ~47MB STIX bundle and the SecureBERT embeddings/projection/metadata.
+backend/data/mitre/
 
 # Runtime state (SQLite verdict cache — router fast path, spec section 2)
 backend/data/cache.db

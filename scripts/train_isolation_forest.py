@@ -11,33 +11,48 @@ you have a better baseline traffic sample (e.g. a real CICIDS2017/
 UNSW-NB15 export) — point `--input` at a CSV of normal-traffic flow
 records and it will re-fit and overwrite the persisted artifact.
 
+Per spec section 5.2 this persists THREE things every run: the model,
+the scaler, and an escalation *threshold* (the Nth-percentile anomaly
+score over held-out normal traffic — recomputed each retrain, never a
+fixed cutoff). Hyperparameters come from `backend/config.py`
+(n_estimators=200, max_samples=256, contamination=0.02, random_state=42).
+
+Feature sets:
+  --feature-set csv     (default) 10 per-row CICIDS2017/UNSW-NB15 features
+  --feature-set window  8 live windowed features (network/flow_collector.py)
+
 Usage:
     python scripts/train_isolation_forest.py
     python scripts/train_isolation_forest.py --input path/to/normal_traffic.csv
+    python scripts/train_isolation_forest.py --feature-set window --synthetic
 """
 from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 from pathlib import Path
 
 import joblib
 import numpy as np
-from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 BACKEND_DIR = REPO_ROOT / "backend"
 sys.path.insert(0, str(BACKEND_DIR))
 
-from network.feature_engineering import FEATURE_NAMES, extract_features  # noqa: E402
+from config import get_settings  # noqa: E402
+from network.feature_engineering import FEATURE_SETS  # noqa: E402
+from network.isolation_forest import build_isolation_forest, compute_threshold  # noqa: E402
 
 DEFAULT_OUTPUT_DIR = BACKEND_DIR / "model_artifacts"
 DEFAULT_SAMPLE_CSV = BACKEND_DIR / "data" / "network_datasets" / "cicids2017_sample.csv"
 
 
-def load_baseline_from_csv(csv_path: Path, benign_label_values: tuple[str, ...] = ("BENIGN", "benign", "0")) -> np.ndarray:
+def load_baseline_from_csv(
+    csv_path: Path, extractor, benign_label_values: tuple[str, ...] = ("BENIGN", "benign", "0")
+) -> np.ndarray:
     """Load only the *benign/normal* rows of a labeled flow CSV as the
     Isolation Forest's baseline (it should only ever be fit on normal
     traffic, never attack traffic)."""
@@ -48,32 +63,34 @@ def load_baseline_from_csv(csv_path: Path, benign_label_values: tuple[str, ...] 
         for row in reader:
             if label_col and row.get(label_col, "").strip() not in benign_label_values:
                 continue
-            rows.append(extract_features(row))
+            rows.append(extractor(row))
     return np.array(rows, dtype=float)
 
 
-def synthesize_baseline(n_samples: int = 4000, seed: int = 42) -> np.ndarray:
-    """Generate a synthetic baseline of plausible normal traffic, used when
-    no real baseline CSV is supplied. Distribution parameters are loosely
-    modeled on typical CICIDS2017 benign-traffic flow statistics."""
-    rng = np.random.default_rng(seed)
-    means = [1.2, 6.0, 6.0, 550.0, 550.0, 1100.0, 11.0, 443.0, 105.0, 1.0]
-    stds = [0.6, 2.5, 2.5, 220.0, 220.0, 450.0, 4.5, 220.0, 35.0, 0.6]
-    data = rng.normal(loc=means, scale=stds, size=(n_samples, len(FEATURE_NAMES)))
-    return np.clip(data, 0, None)
+def synthesize_baseline(feature_set: str, n_samples: int = 4000, seed: int = 42) -> np.ndarray:
+    """Synthetic normal-traffic baseline, used when no real CSV is supplied."""
+    # Reuse the detector's synthesizer so bootstrap and training agree.
+    from network.isolation_forest import _synthetic_baseline
+
+    return _synthetic_baseline(feature_set, n_samples=n_samples, seed=seed)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Fit the SentinelAI Isolation Forest anomaly model.")
+    settings = get_settings()
+    parser = argparse.ArgumentParser(description="Fit the security-copilot Isolation Forest anomaly model.")
     parser.add_argument(
         "--input",
         type=Path,
         default=None,
-        help="CSV of network flow records to use as the normal-traffic baseline. "
-        "Defaults to the bundled sample dataset; pass a real dataset export for production quality.",
+        help="CSV of network flow records to use as the normal-traffic baseline "
+        "(csv feature set only). Defaults to the bundled sample dataset.",
     )
-    parser.add_argument("--contamination", type=float, default=0.05, help="Expected proportion of outliers")
-    parser.add_argument("--n-estimators", type=int, default=200)
+    parser.add_argument(
+        "--feature-set",
+        choices=list(FEATURE_SETS),
+        default="csv",
+        help="csv = per-row dataset features; window = live windowed features.",
+    )
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument(
         "--synthetic",
@@ -82,47 +99,84 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if args.synthetic:
-        print("Fitting on a synthetic baseline distribution...")
-        baseline = synthesize_baseline()
+    feature_set = args.feature_set
+    names = FEATURE_SETS[feature_set]["names"]
+    extractor = FEATURE_SETS[feature_set]["extractor"]
+
+    if args.synthetic or feature_set == "window":
+        if feature_set == "csv" and args.synthetic:
+            print("Fitting on a synthetic baseline distribution...")
+        else:
+            print(f"Fitting {feature_set} model on a synthetic baseline distribution...")
+        baseline = synthesize_baseline(feature_set)
     else:
         input_path = args.input or DEFAULT_SAMPLE_CSV
         if not input_path.exists():
             print(f"Input CSV not found at {input_path}; falling back to synthetic baseline.")
-            baseline = synthesize_baseline()
+            baseline = synthesize_baseline(feature_set)
         else:
             print(f"Loading benign-traffic baseline from {input_path} ...")
-            baseline = load_baseline_from_csv(input_path)
+            baseline = load_baseline_from_csv(input_path, extractor)
             if len(baseline) < 30:
                 print(
                     f"Only {len(baseline)} benign rows found in {input_path.name}; "
                     "augmenting with synthetic samples for a more stable fit."
                 )
-                baseline = np.vstack([baseline, synthesize_baseline(n_samples=1000)]) if len(baseline) else synthesize_baseline()
+                synth = synthesize_baseline(feature_set, n_samples=1000)
+                baseline = np.vstack([baseline, synth]) if len(baseline) else synth
 
-    print(f"Baseline shape: {baseline.shape} (features: {FEATURE_NAMES})")
+    print(f"Baseline shape: {baseline.shape} (features: {names})")
+
+    # Hold out 20% of normal traffic to compute the escalation threshold on —
+    # the model must not have seen it during fit, so the percentile reflects
+    # genuine generalization, not memorized training points.
+    rng = np.random.default_rng(42)
+    rng.shuffle(baseline)
+    split = max(1, int(len(baseline) * 0.8))
+    train, holdout = baseline[:split], baseline[split:]
+    if len(holdout) == 0:  # tiny datasets: reuse train for the threshold
+        holdout = train
 
     scaler = StandardScaler()
-    scaled = scaler.fit_transform(baseline)
+    scaled_train = scaler.fit_transform(train)
 
-    model = IsolationForest(
-        n_estimators=args.n_estimators,
-        contamination=args.contamination,
-        random_state=42,
-        n_jobs=-1,
-    )
-    model.fit(scaled)
+    model = build_isolation_forest()
+    model.fit(scaled_train)
+
+    percentile = settings.ANOMALY_SCORE_THRESHOLD_PERCENTILE
+    threshold = compute_threshold(model, scaler.transform(holdout), percentile)
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    model_path = args.output_dir / "isolation_forest.joblib"
-    scaler_path = args.output_dir / "isolation_forest_scaler.joblib"
+    suffix = "" if feature_set == "csv" else f"_{feature_set}"
+    model_path = args.output_dir / f"isolation_forest{suffix}.joblib"
+    scaler_path = args.output_dir / f"isolation_forest{suffix}_scaler.joblib"
+    threshold_path = model_path.with_suffix(".threshold.json")
 
     joblib.dump(model, model_path)
     joblib.dump(scaler, scaler_path)
+    threshold_path.write_text(
+        json.dumps(
+            {
+                "threshold": threshold,
+                "percentile": percentile,
+                "feature_set": feature_set,
+                "n_train": int(len(train)),
+                "n_holdout": int(len(holdout)),
+                "hyperparameters": {
+                    "n_estimators": settings.ISOLATION_FOREST_N_ESTIMATORS,
+                    "max_samples": settings.ISOLATION_FOREST_MAX_SAMPLES,
+                    "contamination": settings.ISOLATION_FOREST_CONTAMINATION,
+                    "random_state": 42,
+                },
+            },
+            indent=2,
+        )
+    )
 
-    print(f"Saved model  -> {model_path}")
-    print(f"Saved scaler -> {scaler_path}")
-    print("Done. The backend will automatically pick up this artifact on next startup.")
+    print(f"Saved model     -> {model_path}")
+    print(f"Saved scaler    -> {scaler_path}")
+    print(f"Saved threshold -> {threshold_path}  (P{percentile:g} anomaly score = {threshold:.4f})")
+    print("Done. The backend will automatically pick up these artifacts on next startup.")
 
 
 if __name__ == "__main__":

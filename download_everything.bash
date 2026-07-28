@@ -54,7 +54,7 @@ warn "(needs sudo — installs OS-level libraries, not run automatically by this
 # --- Backend: .env scaffolding -------------------------------------------
 if [ ! -f ".env" ]; then
   cp .env.example .env
-  log "Created backend/.env from .env.example — fill in GROQ_API_KEY before running the agent"
+  log "Created backend/.env from .env.example — fill in GROQ_API_KEYS before running the agent"
 else
   echo ".env already exists, leaving it alone"
 fi
@@ -91,8 +91,10 @@ log "Setup complete."
 cat <<EOF
 
 Next steps:
-  1. Fill in backend/.env (GROQ_API_KEY is required, VT_API_KEY is optional
+  1. Fill in backend/.env (GROQ_API_KEYS is required, VT_API_KEY is optional
      but recommended — see backend/README.md for where to get both).
-  2. Run ./start_all.bash to start the backend.
+  2. Run ./run_all.bash to start the backend + network helper (or ./start_all.bash
+     for just the backend). The first run also trains the network models and
+     builds the MITRE index (~500MB download, one-time).
   3. Load extension/dist/ as an unpacked extension in chrome://extensions.
 EOF

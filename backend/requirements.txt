@@ -46,6 +46,11 @@ numpy==2.2.1
 joblib==1.4.2
 pandas==2.2.3
 
+# --- Network flow capture (network/flow_collector.py — spec section 5.1) ---
+psutil==6.1.1
+# TranAD (network/tranad.py — spec section 5.3) also runs on torch (the same
+# manual torch install noted above); no extra package needed.
+
 # --- Logging / utils -----------------------------------------------------
 python-dotenv==1.0.1
 
@@ -53,8 +58,8 @@ python-dotenv==1.0.1
 pytest==8.3.4
 pytest-asyncio==0.25.0
 
-# --- NOTE -----------------------------------------------------
-# `psutil` (network/flow_collector.py) and a vector-index lib
-# (mitre/build_index.py — faiss or plain numpy is enough) aren't listed
-# yet because those modules are still stubs (spec sections 5.1, 6). Add
-# them when those files get built out (spec section 15, steps 8 and 11).
+# --- MITRE ATT&CK mapping (mitre/ — spec section 6) ---------------------
+# SecureBERT embeddings run on transformers + torch (both already required
+# above; torch is the manual install noted above). The vector index itself
+# is a plain numpy array + sidecar JSON (mitre/build_index.py) — no faiss or
+# hosted vector DB needed at a few-hundred-technique scale.

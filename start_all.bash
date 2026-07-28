@@ -29,8 +29,8 @@ if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
   die "Something is already listening on 127.0.0.1:$PORT (likely an unrelated project — this repo defaults to 8010 to avoid the usual 8000/8001 collisions). Stop it first, or run with PORT=<free-port> ./start_all.bash."
 fi
 
-if ! grep -q '^GROQ_API_KEY=.\+' .env; then
-  printf '\033[1;33m!! GROQ_API_KEY looks empty in backend/.env — the agent will fail on every case. Get a free key at https://console.groq.com/keys\033[0m\n'
+if ! grep -qE '^GROQ_API_KEYS?=.+' .env; then
+  printf '\033[1;33m!! No GROQ_API_KEYS (or GROQ_API_KEY) set in backend/.env — the agent will fail on every case. Get free keys at https://console.groq.com/keys\033[0m\n'
 fi
 
 log "Starting security-copilot backend on http://127.0.0.1:$PORT"
