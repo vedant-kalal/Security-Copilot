@@ -27,7 +27,7 @@ trained and on disk; `run_all.bash` detects them and skips straight to launching
       - CICIDS2017: https://www.unb.ca/cic/datasets/ids-2017.html
       - NSL-KDD: https://www.unb.ca/cic/datasets/nsl.html
       ```bash
-      cd backend && source .venv/bin/activate
+      source .venv/bin/activate && cd backend
       python ../scripts/train_isolation_forest.py --input path/to/full.csv
       python ../scripts/train_isolation_forest.py --feature-set window --input path/to/windows.csv
       python ../scripts/train_tranad.py --input path/to/windows.csv

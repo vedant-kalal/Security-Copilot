@@ -107,7 +107,7 @@ Use the original `./start_all.bash`, or `WITH_NATIVE_HOST=0 ./run_all.bash`.
 Open **http://127.0.0.1:8010/** for the history/report UI, or use the CLI:
 
 ```bash
-cd backend && source .venv/bin/activate
+source .venv/bin/activate && cd backend
 python cli.py link https://example.com
 python cli.py email    # paste text, then Ctrl-D
 ```
@@ -122,12 +122,11 @@ python cli.py email    # paste text, then Ctrl-D
 ### Manual setup (if you'd rather not run the scripts)
 
 ```bash
-cd backend
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv && source .venv/bin/activate   # venv lives at the repo root
 pip install torch --index-url https://download.pytorch.org/whl/cpu   # or the cu128 index for a CUDA GPU
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 playwright install chromium
-cp .env.example .env   # then fill in GROQ_API_KEYS
+cd backend && cp .env.example .env   # then fill in GROQ_API_KEYS
 uvicorn api.app:app --reload --port 8010
 ```
 
@@ -135,9 +134,11 @@ uvicorn api.app:app --reload --port 8010
 
 | Script | What it does |
 |---|---|
-| `download_everything.bash` | One-time setup: backend venv, Python deps, Chromium, ML model cache, extension build. |
+| `download_everything.bash` | One-time setup: repo-root venv, Python deps, Chromium, ML model cache, extension build. |
 | `run_all.bash` | Starts **everything**: backend + native network helper. Trains models / builds the MITRE index on first run. |
 | `start_all.bash` | Starts **just the backend** (link/email agent + web UI). No network monitoring. |
+
+All three expect the venv at `.venv/` in the repo root (not inside `backend/`) — that's what `download_everything.bash` creates.
 
 ## Load the Chrome extension
 
@@ -175,8 +176,8 @@ protocol, it just POSTs to the backend like everything else. Its loop:
 `run_all.bash` starts this helper for you. To run it on its own (backend must already be up):
 
 ```bash
-cd backend && source .venv/bin/activate
-python ../native-host/host.py --backend-url http://127.0.0.1:8010
+source .venv/bin/activate
+python native-host/host.py --backend-url http://127.0.0.1:8010
 ```
 
 ### Training the models / building the index
@@ -184,7 +185,7 @@ python ../native-host/host.py --backend-url http://127.0.0.1:8010
 `run_all.bash` does this automatically on first run; to (re)build them by hand:
 
 ```bash
-cd backend && source .venv/bin/activate
+source .venv/bin/activate && cd backend
 
 # Isolation Forest — per-row (labeled datasets) and windowed (live scoring):
 python ../scripts/train_isolation_forest.py                       # csv/per-row model
@@ -204,6 +205,7 @@ quality, retrain against the full [CICIDS2017](https://www.unb.ca/cic/datasets/i
 Generate a network anomaly on cue instead of waiting for real traffic to do something interesting:
 
 ```bash
+source .venv/bin/activate
 # Guaranteed: POST one hand-crafted anomalous flow straight to /report-flow
 python scripts/staged_flow_trigger.py post --backend-url http://127.0.0.1:8010
 # Live: open a burst of failed outbound connections for the running helper to catch

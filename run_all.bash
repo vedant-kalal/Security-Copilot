@@ -11,8 +11,9 @@
 # The Chrome extension is not a process — load extension/dist/ as an unpacked
 # extension in chrome://extensions separately (see the README).
 #
-# Prereqs: run ./download_everything.bash once first (creates backend/.venv,
-# installs deps + Chromium), then fill in backend/.env with your GROQ_API_KEYS.
+# Prereqs: run ./download_everything.bash once first (creates .venv at the
+# repo root, installs deps + Chromium), then fill in backend/.env with your
+# GROQ_API_KEYS.
 #
 # Usage:
 #   ./run_all.bash                     # backend + native helper on :8010
@@ -23,6 +24,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
+VENV_DIR="$ROOT_DIR/.venv"
 PORT="${PORT:-8010}"
 WITH_NATIVE_HOST="${WITH_NATIVE_HOST:-1}"
 SKIP_MITRE="${SKIP_MITRE:-0}"
@@ -31,13 +33,14 @@ log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
 warn() { printf '\033[1;33m!! %s\033[0m\n' "$1"; }
 die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 
+[ -d "$VENV_DIR" ] || die ".venv not found at $VENV_DIR — run ./download_everything.bash first."
+
 cd "$BACKEND_DIR"
 
-[ -d ".venv" ] || die ".venv not found — run ./download_everything.bash first."
-[ -f ".env" ]  || die "backend/.env not found — run ./download_everything.bash first, then fill in GROQ_API_KEYS."
+[ -f ".env" ] || die "backend/.env not found — run ./download_everything.bash first, then fill in GROQ_API_KEYS."
 
 # shellcheck disable=SC1091
-source .venv/bin/activate
+source "$VENV_DIR/bin/activate"
 
 grep -qE '^GROQ_API_KEYS?=.+' .env || \
   warn "No GROQ_API_KEYS (or GROQ_API_KEY) set in backend/.env — the agent will fail on every case. Get free keys at https://console.groq.com/keys"
@@ -52,9 +55,9 @@ fi
 # a synthetic bootstrap model if an artifact is missing, but training real ones
 # gives proper detection quality.
 log "Checking network-anomaly models"
-[ -f "model_artifacts/isolation_forest.joblib" ]        || python scripts/train_isolation_forest.py
-[ -f "model_artifacts/isolation_forest_window.joblib" ] || python scripts/train_isolation_forest.py --feature-set window
-[ -f "model_artifacts/tranad.pt" ]                      || python scripts/train_tranad.py
+[ -f "model_artifacts/isolation_forest.joblib" ]        || python "$ROOT_DIR/scripts/train_isolation_forest.py"
+[ -f "model_artifacts/isolation_forest_window.joblib" ] || python "$ROOT_DIR/scripts/train_isolation_forest.py" --feature-set window
+[ -f "model_artifacts/tranad.pt" ]                      || python "$ROOT_DIR/scripts/train_tranad.py"
 
 # The MITRE index is the slow one (first run downloads ~500MB SecureBERT + the
 # ATT&CK STIX bundle). Without it, /report-flow still works — flows just aren't

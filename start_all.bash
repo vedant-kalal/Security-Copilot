@@ -7,6 +7,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
+VENV_DIR="$ROOT_DIR/.venv"
 
 # Ports 8000/8001 are commonly already taken by other local projects — this
 # project defaults to 8010 for exactly that reason. Override with:
@@ -16,13 +17,14 @@ PORT="${PORT:-8010}"
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
 die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 
+[ -d "$VENV_DIR" ] || die ".venv not found at $VENV_DIR — run ./download_everything.bash first."
+
 cd "$BACKEND_DIR"
 
-[ -d ".venv" ] || die ".venv not found — run ./download_everything.bash first."
-[ -f ".env" ]  || die "backend/.env not found — run ./download_everything.bash first, then fill in GROQ_API_KEY."
+[ -f ".env" ] || die "backend/.env not found — run ./download_everything.bash first, then fill in GROQ_API_KEYS."
 
 # shellcheck disable=SC1091
-source .venv/bin/activate
+source "$VENV_DIR/bin/activate"
 
 if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
   exec 3>&-

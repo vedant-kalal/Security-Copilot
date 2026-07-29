@@ -62,20 +62,20 @@ something is wired up.
 
 ## Run it
 
-First time only:
+First time only — or just run `../download_everything.bash` from here, which does all of this:
 
 ```bash
-cd backend
+cd ..   # repo root — the venv lives there, not inside backend/
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+pip install -r backend/requirements.txt
 playwright install chromium          # needed by tools/inspect_website.py
-cp .env.example .env                 # then fill in GROQ_API_KEY at minimum
+cd backend && cp .env.example .env   # then fill in GROQ_API_KEYS at minimum
 ```
 
-Every time after that — just activate the venv:
+Every time after that — just activate the venv and cd back in:
 
 ```bash
-cd backend && source .venv/bin/activate
+source ../.venv/bin/activate   # if you're already in backend/
 ```
 
 **Terminal** (fastest way to watch one case run — prints every tool call live, writes a report + history entry):
