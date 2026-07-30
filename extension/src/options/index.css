@@ -6,3 +6,24 @@ body {
   @apply bg-void text-fog font-body antialiased;
   min-width: 480px;
 }
+
+/* ── Custom scrollbar ──────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: theme('colors.panel.line'); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: theme('colors.fog.dim'); }
+
+/* ── Focus ring ────────────────────────────────────────────── */
+*:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px theme('colors.accent.DEFAULT');
+}
+
+/* ── Glassmorphism utility ─────────────────────────────────── */
+@layer utilities {
+  .glass {
+    background: rgba(15, 22, 41, 0.5);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+}
