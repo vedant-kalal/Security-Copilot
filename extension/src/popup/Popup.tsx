@@ -1,7 +1,9 @@
 import {
+  Activity,
   AlertTriangle,
   ExternalLink,
   FileText,
+  Fish,
   Link2,
   Loader2,
   RotateCcw,
@@ -13,11 +15,15 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { AnomalyView } from "@/popup/AnomalyView";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { api, ApiError } from "@/lib/api";
 import { getStorage, getTabVerdict, setTabVerdict, type TabVerdict } from "@/lib/storage";
 import type { CheckEmailResponse, CheckLinksResponse } from "@/types";
 
 const MAX_PAGE_TEXT_CHARS = 20000;
+
+type Mode = "phishing" | "anomaly";
 
 interface ActiveTab {
   id: number;
@@ -55,6 +61,7 @@ function labelMeta(label: TabVerdict["label"]) {
 }
 
 export function Popup() {
+  const [mode, setMode] = useState<Mode>("phishing");
   const [view, setView] = useState<View>({ status: "loading" });
 
   useEffect(() => {
@@ -156,135 +163,168 @@ export function Popup() {
           <ShieldHalf className="h-4.5 w-4.5 text-sentinel" />
         </div>
         <span className="font-display text-sm font-bold tracking-wide">security-copilot</span>
-        <button
-          className="ml-auto rounded-md p-1.5 text-fog-faint transition-colors duration-200 hover:bg-panel-raised hover:text-fog"
-          title="Settings"
-          onClick={() => chrome.runtime.openOptionsPage()}
-        >
-          <Settings className="h-4 w-4" />
-        </button>
+        <div className="ml-auto flex items-center gap-1">
+          <ThemeToggle />
+          <button
+            className="rounded-md p-1.5 text-fog-faint transition-colors duration-200 hover:bg-panel-raised hover:text-fog"
+            title="Settings"
+            onClick={() => chrome.runtime.openOptionsPage()}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+        </div>
       </header>
+
+      {/* ── Mode tabs ───────────────────────────────────────────── */}
+      <div className="flex gap-2 px-5 pb-1 pt-3">
+        <button
+          onClick={() => setMode("phishing")}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-semibold tracking-wide transition-all duration-200 ${
+            mode === "phishing"
+              ? "border-accent bg-accent/10 text-accent shadow-glow-accent"
+              : "border-panel-line text-fog-dim hover:text-fog"
+          }`}
+        >
+          <Fish className="h-3.5 w-3.5" />
+          Phishing
+        </button>
+        <button
+          onClick={() => setMode("anomaly")}
+          className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg border py-2 text-xs font-semibold tracking-wide transition-all duration-200 ${
+            mode === "anomaly"
+              ? "border-sentinel bg-sentinel/10 text-sentinel shadow-glow-sentinel"
+              : "border-panel-line text-fog-dim hover:text-fog"
+          }`}
+        >
+          <Activity className="h-3.5 w-3.5" />
+          Anomaly
+        </button>
+      </div>
 
       {/* ── Body ────────────────────────────────────────────────── */}
       <div className="p-5">
-        {view.status === "loading" && <p className="py-10 text-center text-sm text-fog-dim">Loading...</p>}
-
-        {view.status === "unsupported" && (
-          <p className="py-10 text-center text-sm text-fog-dim">Open a regular http(s) page to run a check.</p>
-        )}
-
-        {tab && (
+        {mode === "anomaly" ? (
+          <AnomalyView />
+        ) : (
           <>
-            <p className="mb-4 truncate rounded-md bg-panel-raised/50 px-3 py-1.5 font-mono text-xs text-fog-faint" title={tab.url}>
-              {tab.hostname}
-            </p>
+            {view.status === "loading" && <p className="py-10 text-center text-sm text-fog-dim">Loading...</p>}
 
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                disabled={view.status === "checking"}
-                onClick={() => handleCheckUrl(tab)}
-                className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog transition-all duration-200 hover:border-sentinel/30 hover:bg-panel-raised hover:shadow-glow-sentinel disabled:opacity-40"
-              >
-                {view.status === "checking" && view.kind === "link" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Link2 className="h-3.5 w-3.5 text-sentinel" />
-                )}
-                Check this URL
-              </button>
-              <button
-                disabled={view.status === "checking"}
-                onClick={() => handleCheckText(tab)}
-                className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog transition-all duration-200 hover:border-accent/30 hover:bg-panel-raised hover:shadow-glow-accent disabled:opacity-40"
-              >
-                {view.status === "checking" && view.kind === "email" ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <FileText className="h-3.5 w-3.5 text-accent" />
-                )}
-                Check page text
-              </button>
-            </div>
+            {view.status === "unsupported" && (
+              <p className="py-10 text-center text-sm text-fog-dim">Open a regular http(s) page to run a check.</p>
+            )}
 
-            {view.status === "checking" && (
-              <div className="mt-4 rounded-lg scan-bg animate-scan px-4 py-2.5 text-center">
-                <p className="font-mono text-xs text-fog-dim">
-                  Investigating — agent is scanning the target...
+            {tab && (
+              <>
+                <p className="mb-4 truncate rounded-md bg-panel-raised/50 px-3 py-1.5 font-mono text-xs text-fog-faint" title={tab.url}>
+                  {tab.hostname}
                 </p>
-              </div>
-            )}
 
-            {view.status === "error" && (
-              <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-threat-critical/30 bg-threat-critical/10 p-3 shadow-glow-critical">
-                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-threat-critical" />
-                <p className="text-xs leading-relaxed text-threat-critical">{view.message}</p>
-              </div>
-            )}
-
-            {view.status === "result" &&
-              (() => {
-                const { Icon, color, bg, border, glow } = labelMeta(view.verdict.label);
-                return (
-                  <div className="mt-4 space-y-3">
-                    {/* Verdict banner */}
-                    <div className={`glass flex items-start gap-3 rounded-lg border ${border} ${bg} p-4 ${glow}`}>
-                      <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${color}`} />
-                      <div>
-                        <p className={`text-sm font-bold capitalize ${color}`}>{view.verdict.label}</p>
-                        <p className="mt-0.5 font-mono text-xs text-fog-faint">
-                          {view.verdict.kind === "link" ? "URL check" : "Page text check"} &middot;{" "}
-                          {Math.round(view.verdict.confidence * 100)}% confidence
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Reason */}
-                    <p className="text-xs leading-relaxed text-fog-dim">{view.verdict.reason}</p>
-
-                    {/* Mitigation */}
-                    {view.verdict.mitigation && (
-                      <p className="border-t border-panel-line pt-3 text-xs leading-relaxed text-fog-faint">{view.verdict.mitigation}</p>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    disabled={view.status === "checking"}
+                    onClick={() => handleCheckUrl(tab)}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog transition-all duration-200 hover:border-sentinel/30 hover:bg-panel-raised hover:shadow-glow-sentinel disabled:opacity-40"
+                  >
+                    {view.status === "checking" && view.kind === "link" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Link2 className="h-3.5 w-3.5 text-sentinel" />
                     )}
-
-                    {/* Legitimate alternatives */}
-                    {view.verdict.legitimateAlternatives.length > 0 && (
-                      <div className="border-t border-panel-line pt-3">
-                        <p className="mb-1.5 text-xs font-medium text-fog-faint">This might be an impersonation of:</p>
-                        {view.verdict.legitimateAlternatives.map((alt) => (
-                          <a
-                            key={alt.url}
-                            href={alt.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="block truncate text-xs text-sentinel transition-colors duration-200 hover:text-sentinel-glow hover:underline"
-                          >
-                            {alt.title}
-                          </a>
-                        ))}
-                      </div>
+                    Check this URL
+                  </button>
+                  <button
+                    disabled={view.status === "checking"}
+                    onClick={() => handleCheckText(tab)}
+                    className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog transition-all duration-200 hover:border-accent/30 hover:bg-panel-raised hover:shadow-glow-accent disabled:opacity-40"
+                  >
+                    {view.status === "checking" && view.kind === "email" ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <FileText className="h-3.5 w-3.5 text-accent" />
                     )}
+                    Check page text
+                  </button>
+                </div>
 
-                    {/* Action buttons */}
-                    <div className="grid grid-cols-2 gap-3 pt-1">
-                      <button
-                        onClick={() => handleViewReport(view.verdict.runId!)}
-                        disabled={!view.verdict.runId}
-                        className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog transition-all duration-200 hover:border-sentinel/30 hover:bg-panel-raised hover:shadow-glow-sentinel disabled:opacity-40"
-                      >
-                        <ExternalLink className="h-3.5 w-3.5" />
-                        Full report
-                      </button>
-                      <button
-                        onClick={() => setView({ status: "idle", tab })}
-                        className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog-dim transition-all duration-200 hover:bg-panel-raised"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        Dismiss
-                      </button>
-                    </div>
+                {view.status === "checking" && (
+                  <div className="mt-4 rounded-lg scan-bg animate-scan px-4 py-2.5 text-center">
+                    <p className="font-mono text-xs text-fog-dim">Investigating — agent is scanning the target...</p>
                   </div>
-                );
-              })()}
+                )}
+
+                {view.status === "error" && (
+                  <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-threat-critical/30 bg-threat-critical/10 p-3 shadow-glow-critical">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-threat-critical" />
+                    <p className="text-xs leading-relaxed text-threat-critical">{view.message}</p>
+                  </div>
+                )}
+
+                {view.status === "result" &&
+                  (() => {
+                    const { Icon, color, bg, border, glow } = labelMeta(view.verdict.label);
+                    return (
+                      <div className="mt-4 space-y-3">
+                        {/* Verdict banner */}
+                        <div className={`glass flex items-start gap-3 rounded-lg border ${border} ${bg} p-4 ${glow}`}>
+                          <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${color}`} />
+                          <div>
+                            <p className={`text-sm font-bold capitalize ${color}`}>{view.verdict.label}</p>
+                            <p className="mt-0.5 font-mono text-xs text-fog-faint">
+                              {view.verdict.kind === "link" ? "URL check" : "Page text check"} &middot;{" "}
+                              {Math.round(view.verdict.confidence * 100)}% confidence
+                            </p>
+                          </div>
+                        </div>
+
+                        {/* Reason */}
+                        <p className="text-xs leading-relaxed text-fog-dim">{view.verdict.reason}</p>
+
+                        {/* Mitigation */}
+                        {view.verdict.mitigation && (
+                          <p className="border-t border-panel-line pt-3 text-xs leading-relaxed text-fog-faint">{view.verdict.mitigation}</p>
+                        )}
+
+                        {/* Legitimate alternatives */}
+                        {view.verdict.legitimateAlternatives.length > 0 && (
+                          <div className="border-t border-panel-line pt-3">
+                            <p className="mb-1.5 text-xs font-medium text-fog-faint">This might be an impersonation of:</p>
+                            {view.verdict.legitimateAlternatives.map((alt) => (
+                              <a
+                                key={alt.url}
+                                href={alt.url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="block truncate text-xs text-sentinel transition-colors duration-200 hover:text-sentinel-glow hover:underline"
+                              >
+                                {alt.title}
+                              </a>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Action buttons */}
+                        <div className="grid grid-cols-2 gap-3 pt-1">
+                          <button
+                            onClick={() => handleViewReport(view.verdict.runId!)}
+                            disabled={!view.verdict.runId}
+                            className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog transition-all duration-200 hover:border-sentinel/30 hover:bg-panel-raised hover:shadow-glow-sentinel disabled:opacity-40"
+                          >
+                            <ExternalLink className="h-3.5 w-3.5" />
+                            Full report
+                          </button>
+                          <button
+                            onClick={() => setView({ status: "idle", tab })}
+                            className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog-dim transition-all duration-200 hover:bg-panel-raised"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                            Dismiss
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })()}
+              </>
+            )}
           </>
         )}
       </div>

@@ -1,6 +1,7 @@
 import { Save, ShieldHalf } from "lucide-react";
 import { useEffect, useState } from "react";
 
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { getStorage, setStorage } from "@/lib/storage";
 
 export function Options() {
@@ -29,6 +30,9 @@ export function Options() {
           <ShieldHalf className="h-5 w-5 text-sentinel" />
         </div>
         <h1 className="font-display text-lg font-bold tracking-wide">security-copilot Settings</h1>
+        <div className="ml-auto">
+          <ThemeToggle />
+        </div>
       </div>
 
       {/* ── Backend config card ──────────────────────────────── */}

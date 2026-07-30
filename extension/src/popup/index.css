@@ -2,27 +2,78 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Theme palettes (RGB channels; consumed by tailwind.config.ts) ── */
+:root,
+:root[data-theme="dark"] {
+  --c-void: 17 24 39;
+  --c-panel: 26 34 53;
+  --c-panel-raised: 33 43 66;
+  --c-panel-line: 45 58 82;
+  --c-panel-glass: 15 22 41;
+  --c-sentinel: 45 212 191;
+  --c-sentinel-glow: 94 234 212;
+  --c-safe: 52 211 153;
+  --c-threat-low: 91 141 239;
+  --c-threat-medium: 251 191 36;
+  --c-threat-high: 240 101 62;
+  --c-threat-critical: 251 113 133;
+  --c-fog: 226 232 240;
+  --c-fog-dim: 148 163 184;
+  --c-fog-faint: 100 116 139;
+  --c-accent: 129 140 248;
+  --c-accent-deep: 99 102 241;
+  --c-accent-light: 165 180 252;
+  --glass-alpha: 0.5;
+  --shadow-card: 0 4px 24px rgba(0, 0, 0, 0.28), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  --shadow-card-hover: 0 8px 32px rgba(0, 0, 0, 0.36), 0 1px 0 rgba(255, 255, 255, 0.04) inset;
+}
+
+:root[data-theme="light"] {
+  --c-void: 233 234 226; /* cool cream canvas */
+  --c-panel: 243 244 238;
+  --c-panel-raised: 251 252 247;
+  --c-panel-line: 211 214 203;
+  --c-panel-glass: 251 252 247;
+  --c-sentinel: 13 148 136; /* deeper teal for contrast on cream */
+  --c-sentinel-glow: 13 148 136;
+  --c-safe: 5 150 105;
+  --c-threat-low: 37 99 235;
+  --c-threat-medium: 194 98 10;
+  --c-threat-high: 234 88 12;
+  --c-threat-critical: 225 29 72;
+  --c-fog: 34 42 53; /* dark slate text */
+  --c-fog-dim: 94 104 117;
+  --c-fog-faint: 122 132 145;
+  --c-accent: 88 80 236;
+  --c-accent-deep: 79 70 229;
+  --c-accent-light: 129 122 240;
+  --glass-alpha: 0.65;
+  --shadow-card: 0 2px 16px rgba(60, 70, 90, 0.10), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+  --shadow-card-hover: 0 6px 24px rgba(60, 70, 90, 0.14), 0 1px 0 rgba(255, 255, 255, 0.6) inset;
+}
+
 body {
   @apply bg-void text-fog font-body antialiased;
   width: 380px;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }
 
 /* ── Custom scrollbar ──────────────────────────────────────── */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: theme('colors.panel.line'); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: theme('colors.fog.dim'); }
+::-webkit-scrollbar-thumb { background: rgb(var(--c-panel-line)); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgb(var(--c-fog-dim)); }
 
 /* ── Focus ring ────────────────────────────────────────────── */
 *:focus-visible {
   outline: none;
-  box-shadow: 0 0 0 2px theme('colors.accent.DEFAULT');
+  box-shadow: 0 0 0 2px rgb(var(--c-accent));
 }
 
 /* ── Glassmorphism utility ─────────────────────────────────── */
 @layer utilities {
   .glass {
-    background: rgba(15, 22, 41, 0.5);
+    background: rgb(var(--c-panel-glass) / var(--glass-alpha));
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
   }
@@ -31,14 +82,14 @@ body {
 /* ── Gradient border utility ───────────────────────────────── */
 .gradient-border-b {
   border-bottom: 1px solid;
-  border-image: linear-gradient(135deg, theme('colors.sentinel.DEFAULT'), theme('colors.accent.DEFAULT')) 1;
+  border-image: linear-gradient(135deg, rgb(var(--c-sentinel)), rgb(var(--c-accent))) 1;
 }
 
 /* ── Scanning animation background ─────────────────────────── */
 .scan-bg {
   background: linear-gradient(90deg,
-    rgba(99,102,241,0.06) 0%,
-    rgba(45,212,191,0.08) 50%,
-    rgba(99,102,241,0.06) 100%);
+    rgb(var(--c-accent) / 0.08) 0%,
+    rgb(var(--c-sentinel) / 0.10) 50%,
+    rgb(var(--c-accent) / 0.08) 100%);
   background-size: 200% 100%;
 }

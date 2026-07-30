@@ -81,13 +81,24 @@ def record_run(
     return run_id
 
 
-def list_runs(limit: int = 50) -> list[dict]:
-    """Summary rows for the history list view — newest first."""
+def list_runs(limit: int = 50, case_types: Optional[list[str]] = None) -> list[dict]:
+    """Summary rows for the history list view — newest first.
+
+    `case_types`, when given, restricts to those case_type values — e.g.
+    ["link", "email"] for phishing checks, ["network_flow"] for anomaly
+    flows — so the UI's Phishing/Anomaly views each get only their own runs
+    (and one view can't crowd the other out of a limited window)."""
+    query = "SELECT id, case_type, raw_input, created_at, verdict_json FROM runs"
+    params: list[Any] = []
+    if case_types:
+        placeholders = ",".join("?" for _ in case_types)
+        query += f" WHERE case_type IN ({placeholders})"
+        params.extend(case_types)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+
     with _connect() as conn:
-        rows = conn.execute(
-            "SELECT id, case_type, raw_input, created_at, verdict_json FROM runs ORDER BY created_at DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        rows = conn.execute(query, params).fetchall()
 
     return [
         {"id": r[0], "case_type": r[1], "raw_input": r[2], "created_at": r[3], "verdict": json.loads(r[4])}

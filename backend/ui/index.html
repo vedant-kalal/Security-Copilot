@@ -4,6 +4,12 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>security-copilot</title>
+<script>
+  /* Apply the saved theme before first paint so there's no flash. */
+  (function () {
+    document.documentElement.setAttribute('data-theme', localStorage.getItem('sc-theme') || 'dark');
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link
@@ -11,8 +17,8 @@
   rel="stylesheet"
 />
 <style>
-  /* ── Design tokens (softened palette) ────────────────────────────── */
-  :root {
+  /* ── Design tokens — DARK (default) ──────────────────────────────── */
+  :root, :root[data-theme="dark"] {
     --bg:          #111827;
     --panel:       #1A2235;
     --panel-raised:#212B42;
@@ -41,10 +47,55 @@
     --inconclusive-bg: rgba(148,163,184,0.08);
     --inconclusive-glow: rgba(148,163,184,0.15);
 
+    --hover-bg:          rgba(33,43,66,0.6);
+    --card-shadow:       0 4px 24px rgba(0,0,0,0.15), 0 1px 0 rgba(255,255,255,0.04) inset;
+    --card-shadow-hover: 0 8px 32px rgba(0,0,0,0.22), 0 1px 0 rgba(255,255,255,0.04) inset;
+    --tool-shadow:       0 2px 12px rgba(0,0,0,0.1);
+    --tool-shadow-hover: 0 4px 20px rgba(0,0,0,0.2);
+    --input-bg:          var(--bg);
+
     --radius-sm: 8px;
     --radius-md: 12px;
     --radius-lg: 16px;
     --transition: 0.2s ease;
+  }
+
+  /* ── Design tokens — LIGHT (cool cream) ──────────────────────────── */
+  :root[data-theme="light"] {
+    --bg:          #E9EAE2;
+    --panel:       #F3F4EE;
+    --panel-raised:#FBFCF7;
+    --border:      #D3D6CB;
+    --text:        #222A35;
+    --muted:       #5E6875;
+    --accent:      #5850EC;
+    --accent-deep: #4F46E5;
+    --accent-glow: rgba(88,80,236,0.16);
+    --sentinel:    #0E9384;
+    --sentinel-glow: rgba(14,147,132,0.16);
+
+    --dangerous:       #E11D48;
+    --dangerous-bg:    rgba(225,29,72,0.08);
+    --dangerous-glow:  rgba(225,29,72,0.14);
+    --dangerous-bar:   rgba(225,29,72,0.30);
+    --suspicious:      #C2620A;
+    --suspicious-bg:   rgba(194,98,10,0.09);
+    --suspicious-glow: rgba(194,98,10,0.14);
+    --suspicious-bar:  rgba(194,98,10,0.30);
+    --safe:            #059669;
+    --safe-bg:         rgba(5,150,105,0.09);
+    --safe-glow:       rgba(5,150,105,0.14);
+    --safe-bar:        rgba(5,150,105,0.30);
+    --inconclusive:    #64748B;
+    --inconclusive-bg: rgba(100,116,139,0.08);
+    --inconclusive-glow: rgba(100,116,139,0.12);
+
+    --hover-bg:          rgba(30,40,55,0.05);
+    --card-shadow:       0 2px 16px rgba(60,70,90,0.08), 0 1px 0 rgba(255,255,255,0.6) inset;
+    --card-shadow-hover: 0 6px 24px rgba(60,70,90,0.13), 0 1px 0 rgba(255,255,255,0.6) inset;
+    --tool-shadow:       0 2px 10px rgba(60,70,90,0.06);
+    --tool-shadow-hover: 0 4px 18px rgba(60,70,90,0.11);
+    --input-bg:          #FDFEFA;
   }
 
   /* ── Reset & base ────────────────────────────────────────────────── */
@@ -107,6 +158,69 @@
     font-size: 16px; font-weight: 700;
     letter-spacing: 0.01em;
   }
+  .theme-toggle {
+    margin-left: auto;
+    width: 32px; height: 32px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--panel-raised);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--muted); cursor: pointer;
+    transition: color var(--transition), border-color var(--transition), background var(--transition);
+  }
+  .theme-toggle:hover { color: var(--text); border-color: var(--accent); }
+  .theme-toggle svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .theme-toggle .icon-sun { display: none; }
+  :root[data-theme="light"] .theme-toggle .icon-sun { display: block; }
+  :root[data-theme="light"] .theme-toggle .icon-moon { display: none; }
+
+  /* ── Mode tabs (Phishing / Anomaly) ──────────────────────────────── */
+  .mode-tabs {
+    display: flex; gap: 6px;
+    padding: 14px 20px 0;
+  }
+  .mode-tab {
+    flex: 1;
+    display: flex; align-items: center; justify-content: center; gap: 7px;
+    padding: 9px 10px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--muted);
+    font-family: 'Inter', sans-serif;
+    font-size: 12px; font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition);
+    letter-spacing: 0.02em;
+  }
+  .mode-tab svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  .mode-tab:hover { color: var(--text); border-color: var(--muted); }
+  .mode-tab.active {
+    color: var(--accent);
+    border-color: var(--accent);
+    background: var(--accent-glow);
+    box-shadow: 0 0 12px var(--accent-glow);
+  }
+  .mode-tab.active.anomaly {
+    color: var(--sentinel);
+    border-color: var(--sentinel);
+    background: var(--sentinel-glow);
+    box-shadow: 0 0 12px var(--sentinel-glow);
+  }
+  .mode-hint {
+    padding: 12px 20px 4px;
+    font-size: 11px; color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    line-height: 1.5;
+    display: flex; align-items: center; gap: 7px;
+  }
+  .mode-hint .pulse-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--sentinel); flex-shrink: 0;
+    box-shadow: 0 0 8px var(--sentinel-glow);
+    animation: pulseDot 2s ease-in-out infinite;
+  }
+  @keyframes pulseDot { 0%,100% { opacity: 0.4; } 50% { opacity: 1; } }
 
   /* ── URL input form ──────────────────────────────────────────────── */
   #submit-form {
@@ -116,7 +230,7 @@
   }
   #url-input {
     flex: 1;
-    background: var(--bg);
+    background: var(--input-bg);
     border: 1px solid var(--border);
     color: var(--text);
     border-radius: var(--radius-sm);
@@ -175,7 +289,7 @@
     transition: background var(--transition), border-color var(--transition);
     border-left: 3px solid transparent;
   }
-  .run-item:hover { background: rgba(33,43,66,0.6); }
+  .run-item:hover { background: var(--hover-bg); }
   .run-item.active {
     background: var(--panel-raised);
     border-left-color: var(--accent);
@@ -227,13 +341,11 @@
     border-radius: var(--radius-md);
     padding: 24px; margin-bottom: 28px;
     background: var(--panel);
-    box-shadow: 0 4px 24px rgba(0,0,0,0.15),
-                0 1px 0 rgba(255,255,255,0.04) inset;
+    box-shadow: var(--card-shadow);
     transition: box-shadow var(--transition);
   }
   .verdict-card:hover {
-    box-shadow: 0 8px 32px rgba(0,0,0,0.22),
-                0 1px 0 rgba(255,255,255,0.04) inset;
+    box-shadow: var(--card-shadow-hover);
   }
   .verdict-card h2 {
     margin: 0 0 12px;
@@ -419,7 +531,7 @@
     border-radius: var(--radius-md);
     padding: 20px 24px; margin-bottom: 16px;
     background: var(--panel);
-    box-shadow: 0 2px 12px rgba(0,0,0,0.1);
+    box-shadow: var(--tool-shadow);
     transition: box-shadow var(--transition), transform var(--transition);
     animation: fadeSlideIn 0.4s ease-out both;
   }
@@ -428,7 +540,7 @@
   .tool-call:nth-child(3) { animation-delay: 0.15s; }
   .tool-call:nth-child(4) { animation-delay: 0.2s; }
   .tool-call:hover {
-    box-shadow: 0 4px 20px rgba(0,0,0,0.2);
+    box-shadow: var(--tool-shadow-hover);
     transform: translateY(-1px);
   }
   .tool-call h3 {
@@ -535,11 +647,26 @@
           <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         </div>
         <h1>security-copilot</h1>
+        <button class="theme-toggle" id="theme-toggle" title="Toggle light / dark" aria-label="Toggle theme">
+          <svg class="icon-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+        </button>
+      </div>
+      <div class="mode-tabs">
+        <button class="mode-tab active" id="tab-phishing" data-mode="phishing">
+          <svg viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+          Phishing
+        </button>
+        <button class="mode-tab anomaly" id="tab-anomaly" data-mode="anomaly">
+          <svg viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+          Anomaly
+        </button>
       </div>
       <form id="submit-form">
         <input id="url-input" placeholder="Paste a URL to check..." autocomplete="off" />
         <button type="submit" id="submit-btn">Check</button>
       </form>
+      <div class="mode-hint" id="mode-hint"></div>
       <div id="status-line"></div>
       <div id="history-list"></div>
     </aside>
@@ -555,8 +682,48 @@ const statusLine = document.getElementById('status-line');
 const form = document.getElementById('submit-form');
 const urlInput = document.getElementById('url-input');
 const submitBtn = document.getElementById('submit-btn');
+const modeHint = document.getElementById('mode-hint');
+const tabPhishing = document.getElementById('tab-phishing');
+const tabAnomaly = document.getElementById('tab-anomaly');
+const themeToggle = document.getElementById('theme-toggle');
 
 let activeRunId = null;
+let currentMode = 'phishing';   // 'phishing' | 'anomaly'
+
+/* ── Theme ─────────────────────────────────────────────────────── */
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('sc-theme', theme);
+}
+themeToggle.addEventListener('click', () => {
+  const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
+  applyTheme(next);
+});
+
+/* ── Mode (Phishing / Anomaly) ─────────────────────────────────── */
+function setMode(mode) {
+  currentMode = mode;
+  tabPhishing.classList.toggle('active', mode === 'phishing');
+  tabAnomaly.classList.toggle('active', mode === 'anomaly');
+
+  // The URL box only makes sense for phishing — anomalies arrive from the
+  // native network helper, they aren't submitted by hand.
+  form.style.display = mode === 'phishing' ? 'flex' : 'none';
+
+  if (mode === 'anomaly') {
+    modeHint.innerHTML = `<span class="pulse-dot"></span>Live network anomalies flagged by the backend monitor.`;
+  } else {
+    modeHint.innerHTML = '';
+  }
+
+  detailPane.innerHTML = mode === 'phishing'
+    ? '<p class="empty-state">Select a run from the left, or submit a new URL above.</p>'
+    : '<p class="empty-state">Select a flagged network flow from the left to see its full investigation.</p>';
+  activeRunId = null;
+  return loadHistory();
+}
+tabPhishing.addEventListener('click', () => setMode('phishing'));
+tabAnomaly.addEventListener('click', () => setMode('anomaly'));
 
 function fmtTime(epochSeconds) {
   return new Date(epochSeconds * 1000).toLocaleString();
@@ -597,9 +764,10 @@ function confidenceGauge(value, label) {
 /* ── Visual bar helper ─────────────────────────────────────────── */
 function visualBar(label, value, max, barClass) {
   const pct = max > 0 ? Math.min(100, Math.round((value / max) * 100)) : 0;
+  const displayValue = max === 100 ? `${value}%` : `${value}${max ? ' / ' + max : ''}`;
   return `
     <div class="visual-bar-container">
-      <div class="visual-bar-label"><span>${label}</span><span>${value}${max ? ' / ' + max : ''}</span></div>
+      <div class="visual-bar-label"><span>${label}</span><span>${displayValue}</span></div>
       <div class="visual-bar-track">
         <div class="visual-bar-fill ${barClass}" style="width:${pct}%"></div>
       </div>
@@ -608,8 +776,11 @@ function visualBar(label, value, max, barClass) {
 }
 
 async function loadHistory() {
-  const res = await fetch('/runs?limit=100');
+  const res = await fetch(`/runs?view=${currentMode}&limit=100`);
   const runs = await res.json();
+  const emptyMsg = currentMode === 'anomaly'
+    ? 'No network anomalies flagged yet.'
+    : 'No checks yet — paste a URL above.';
   historyList.innerHTML = runs.map(r => `
     <div class="run-item ${r.id === activeRunId ? 'active' : ''}" data-id="${r.id}">
       <div class="input">${escapeHtml(r.raw_input)}</div>
@@ -618,7 +789,7 @@ async function loadHistory() {
         <span class="time">${fmtTime(r.created_at)}</span>
       </div>
     </div>
-  `).join('') || '<p class="empty-state" style="padding:16px;">No runs yet.</p>';
+  `).join('') || `<p class="empty-state" style="padding:16px;">${emptyMsg}</p>`;
 
   historyList.querySelectorAll('.run-item').forEach(el => {
     el.addEventListener('click', () => showRun(el.dataset.id));
@@ -750,7 +921,7 @@ function renderContentClassifier(a) {
   return `
     <div class="field"><b>Model:</b> ${escapeHtml(a.model)}</div>
     <div class="field"><b>Input type:</b> ${escapeHtml(a.input_type)}</div>
-    ${visualBar('Phishing probability', Math.round(score * 100) + '%', '', barClass)}
+    ${visualBar('Phishing probability', Math.round(score * 100), 100, barClass)}
     <div class="field"><b>Label:</b> <span class="badge ${a.label === 'phishing' ? 'dangerous' : 'safe'}" style="font-size:10px; padding:2px 8px;">${escapeHtml(a.label)}</span></div>
   `;
 }
@@ -842,8 +1013,25 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-const initialRunId = new URLSearchParams(location.search).get('run');
-loadHistory().then(() => { if (initialRunId) showRun(initialRunId); });
+async function init() {
+  const initialRunId = new URLSearchParams(location.search).get('run');
+
+  // If deep-linked to a specific run, open the matching mode so the sidebar
+  // list agrees with the detail being shown.
+  if (initialRunId) {
+    try {
+      const res = await fetch(`/runs/${initialRunId}`);
+      if (res.ok) {
+        const run = await res.json();
+        currentMode = run.case_type === 'network_flow' ? 'anomaly' : 'phishing';
+      }
+    } catch (_) { /* fall back to default mode */ }
+  }
+
+  await setMode(currentMode);
+  if (initialRunId) showRun(initialRunId);
+}
+init();
 </script>
 </body>
 </html>

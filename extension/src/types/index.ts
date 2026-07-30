@@ -21,3 +21,16 @@ export interface CheckLinksResponse {
 
 /** POST /check-email returns a bare Verdict (api/routes_check_email.py). */
 export type CheckEmailResponse = Verdict;
+
+/** One row from GET /runs (history.py::list_runs) — used by the anomaly viewer. */
+export interface RunSummary {
+  id: string;
+  case_type: string;
+  raw_input: string;
+  created_at: number;
+  verdict: {
+    label: "dangerous" | "suspicious" | "safe" | "inconclusive";
+    confidence: number;
+    reason?: string;
+  };
+}

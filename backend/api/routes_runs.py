@@ -8,6 +8,8 @@ one-off markdown file.
 """
 from __future__ import annotations
 
+from typing import Optional
+
 from fastapi import APIRouter, Query
 
 from exceptions import NotFoundError
@@ -15,11 +17,23 @@ from history import get_run, list_runs
 
 router = APIRouter()
 
+# Friendly view names the UI can pass, mapped to the underlying case_type
+# values. "phishing" = link + email checks; "anomaly" = network flows.
+_VIEW_CASE_TYPES = {
+    "phishing": ["link", "email"],
+    "anomaly": ["network_flow"],
+}
+
 
 @router.get("/runs", tags=["History"])
-async def get_runs(limit: int = Query(default=50, ge=1, le=200)) -> list[dict]:
-    """Summary list — newest first — for the history sidebar."""
-    return list_runs(limit=limit)
+async def get_runs(
+    limit: int = Query(default=50, ge=1, le=200),
+    view: Optional[str] = Query(default=None, description="Filter: 'phishing' or 'anomaly'. Omit for all runs."),
+) -> list[dict]:
+    """Summary list — newest first — for the history sidebar. An optional
+    `view` restricts to phishing (link/email) or anomaly (network_flow) runs."""
+    case_types = _VIEW_CASE_TYPES.get(view) if view else None
+    return list_runs(limit=limit, case_types=case_types)
 
 
 @router.get("/runs/{run_id}", tags=["History"])

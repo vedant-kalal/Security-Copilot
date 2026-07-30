@@ -16,20 +16,7 @@ export class ApiError extends Error {
   }
 }
 
-async function post<T>(path: string, body: unknown): Promise<T> {
-  const { apiBaseUrl } = await getStorage();
-
-  let response: Response;
-  try {
-    response = await fetch(`${apiBaseUrl}${path}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  } catch {
-    throw new ApiError(0, `Could not reach ${apiBaseUrl} — is the backend running? Check the URL in Settings.`);
-  }
-
+async function handle<T>(response: Response): Promise<T> {
   if (!response.ok) {
     let message = response.statusText;
     try {
@@ -40,8 +27,33 @@ async function post<T>(path: string, body: unknown): Promise<T> {
     }
     throw new ApiError(response.status, message);
   }
-
   return (await response.json()) as T;
 }
 
-export const api = { post };
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const { apiBaseUrl } = await getStorage();
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new ApiError(0, `Could not reach ${apiBaseUrl} — is the backend running? Check the URL in Settings.`);
+  }
+  return handle<T>(response);
+}
+
+async function get<T>(path: string): Promise<T> {
+  const { apiBaseUrl } = await getStorage();
+  let response: Response;
+  try {
+    response = await fetch(`${apiBaseUrl}${path}`);
+  } catch {
+    throw new ApiError(0, `Could not reach ${apiBaseUrl} — is the backend running? Check the URL in Settings.`);
+  }
+  return handle<T>(response);
+}
+
+export const api = { post, get };
