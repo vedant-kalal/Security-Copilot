@@ -44,13 +44,13 @@ function hostnameOf(url: string): string {
 function labelMeta(label: TabVerdict["label"]) {
   switch (label) {
     case "dangerous":
-      return { Icon: ShieldAlert, color: "text-threat-critical", bg: "bg-threat-critical/10", border: "border-threat-critical/30" };
+      return { Icon: ShieldAlert, color: "text-threat-critical", bg: "bg-threat-critical/10", border: "border-threat-critical/30", glow: "shadow-glow-critical" };
     case "suspicious":
-      return { Icon: AlertTriangle, color: "text-threat-medium", bg: "bg-threat-medium/10", border: "border-threat-medium/30" };
+      return { Icon: AlertTriangle, color: "text-threat-medium", bg: "bg-threat-medium/10", border: "border-threat-medium/30", glow: "shadow-glow-medium" };
     case "safe":
-      return { Icon: ShieldCheck, color: "text-sentinel", bg: "bg-sentinel/10", border: "border-sentinel/30" };
+      return { Icon: ShieldCheck, color: "text-safe", bg: "bg-safe/10", border: "border-safe/30", glow: "shadow-glow-safe" };
     default:
-      return { Icon: ShieldQuestion, color: "text-fog-dim", bg: "bg-panel-raised", border: "border-panel-line" };
+      return { Icon: ShieldQuestion, color: "text-fog-dim", bg: "bg-panel-raised", border: "border-panel-line", glow: "" };
   }
 }
 
@@ -150,11 +150,14 @@ export function Popup() {
 
   return (
     <div className="flex flex-col">
-      <header className="flex items-center gap-2 border-b border-panel-line px-4 py-3">
-        <ShieldHalf className="h-5 w-5 text-sentinel" />
-        <span className="font-display text-sm font-semibold">security-copilot</span>
+      {/* ── Header ──────────────────────────────────────────────── */}
+      <header className="flex items-center gap-2.5 gradient-border-b px-5 py-3.5">
+        <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-sentinel/15">
+          <ShieldHalf className="h-4.5 w-4.5 text-sentinel" />
+        </div>
+        <span className="font-display text-sm font-bold tracking-wide">security-copilot</span>
         <button
-          className="ml-auto text-fog-faint hover:text-fog"
+          className="ml-auto rounded-md p-1.5 text-fog-faint transition-colors duration-200 hover:bg-panel-raised hover:text-fog"
           title="Settings"
           onClick={() => chrome.runtime.openOptionsPage()}
         >
@@ -162,90 +165,98 @@ export function Popup() {
         </button>
       </header>
 
-      <div className="p-4">
-        {view.status === "loading" && <p className="py-8 text-center text-sm text-fog-dim">Loading...</p>}
+      {/* ── Body ────────────────────────────────────────────────── */}
+      <div className="p-5">
+        {view.status === "loading" && <p className="py-10 text-center text-sm text-fog-dim">Loading...</p>}
 
         {view.status === "unsupported" && (
-          <p className="py-8 text-center text-sm text-fog-dim">Open a regular http(s) page to run a check.</p>
+          <p className="py-10 text-center text-sm text-fog-dim">Open a regular http(s) page to run a check.</p>
         )}
 
         {tab && (
           <>
-            <p className="mb-3 truncate font-mono text-xs text-fog-faint" title={tab.url}>
+            <p className="mb-4 truncate rounded-md bg-panel-raised/50 px-3 py-1.5 font-mono text-xs text-fog-faint" title={tab.url}>
               {tab.hostname}
             </p>
 
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-3">
               <button
                 disabled={view.status === "checking"}
                 onClick={() => handleCheckUrl(tab)}
-                className="flex items-center justify-center gap-1.5 rounded-md border border-panel-line py-2 text-xs font-medium text-fog hover:bg-panel-raised disabled:opacity-50"
+                className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog transition-all duration-200 hover:border-sentinel/30 hover:bg-panel-raised hover:shadow-glow-sentinel disabled:opacity-40"
               >
                 {view.status === "checking" && view.kind === "link" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <Link2 className="h-3.5 w-3.5" />
+                  <Link2 className="h-3.5 w-3.5 text-sentinel" />
                 )}
                 Check this URL
               </button>
               <button
                 disabled={view.status === "checking"}
                 onClick={() => handleCheckText(tab)}
-                className="flex items-center justify-center gap-1.5 rounded-md border border-panel-line py-2 text-xs font-medium text-fog hover:bg-panel-raised disabled:opacity-50"
+                className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog transition-all duration-200 hover:border-accent/30 hover:bg-panel-raised hover:shadow-glow-accent disabled:opacity-40"
               >
                 {view.status === "checking" && view.kind === "email" ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
-                  <FileText className="h-3.5 w-3.5" />
+                  <FileText className="h-3.5 w-3.5 text-accent" />
                 )}
                 Check page text
               </button>
             </div>
 
             {view.status === "checking" && (
-              <p className="mt-3 text-center text-xs text-fog-dim">
-                Investigating — this can take 10-30s while the agent looks around...
-              </p>
+              <div className="mt-4 rounded-lg scan-bg animate-scan px-4 py-2.5 text-center">
+                <p className="font-mono text-xs text-fog-dim">
+                  Investigating — agent is scanning the target...
+                </p>
+              </div>
             )}
 
             {view.status === "error" && (
-              <p className="mt-3 rounded-md border border-threat-critical/30 bg-threat-critical/10 p-2.5 text-xs text-threat-critical">
-                {view.message}
-              </p>
+              <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-threat-critical/30 bg-threat-critical/10 p-3 shadow-glow-critical">
+                <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-threat-critical" />
+                <p className="text-xs leading-relaxed text-threat-critical">{view.message}</p>
+              </div>
             )}
 
             {view.status === "result" &&
               (() => {
-                const { Icon, color, bg, border } = labelMeta(view.verdict.label);
+                const { Icon, color, bg, border, glow } = labelMeta(view.verdict.label);
                 return (
-                  <div className="mt-3 space-y-3">
-                    <div className={`flex items-start gap-3 rounded-md border ${border} ${bg} p-3`}>
+                  <div className="mt-4 space-y-3">
+                    {/* Verdict banner */}
+                    <div className={`glass flex items-start gap-3 rounded-lg border ${border} ${bg} p-4 ${glow}`}>
                       <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${color}`} />
                       <div>
-                        <p className={`text-sm font-semibold capitalize ${color}`}>{view.verdict.label}</p>
-                        <p className="mt-0.5 text-xs text-fog-faint">
+                        <p className={`text-sm font-bold capitalize ${color}`}>{view.verdict.label}</p>
+                        <p className="mt-0.5 font-mono text-xs text-fog-faint">
                           {view.verdict.kind === "link" ? "URL check" : "Page text check"} &middot;{" "}
                           {Math.round(view.verdict.confidence * 100)}% confidence
                         </p>
                       </div>
                     </div>
 
+                    {/* Reason */}
                     <p className="text-xs leading-relaxed text-fog-dim">{view.verdict.reason}</p>
 
+                    {/* Mitigation */}
                     {view.verdict.mitigation && (
-                      <p className="border-t border-panel-line pt-2 text-xs text-fog-faint">{view.verdict.mitigation}</p>
+                      <p className="border-t border-panel-line pt-3 text-xs leading-relaxed text-fog-faint">{view.verdict.mitigation}</p>
                     )}
 
+                    {/* Legitimate alternatives */}
                     {view.verdict.legitimateAlternatives.length > 0 && (
-                      <div className="border-t border-panel-line pt-2">
-                        <p className="mb-1 text-xs text-fog-faint">This might be an impersonation of:</p>
+                      <div className="border-t border-panel-line pt-3">
+                        <p className="mb-1.5 text-xs font-medium text-fog-faint">This might be an impersonation of:</p>
                         {view.verdict.legitimateAlternatives.map((alt) => (
                           <a
                             key={alt.url}
                             href={alt.url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="block truncate text-xs text-sentinel hover:underline"
+                            className="block truncate text-xs text-sentinel transition-colors duration-200 hover:text-sentinel-glow hover:underline"
                           >
                             {alt.title}
                           </a>
@@ -253,18 +264,19 @@ export function Popup() {
                       </div>
                     )}
 
-                    <div className="grid grid-cols-2 gap-2 pt-1">
+                    {/* Action buttons */}
+                    <div className="grid grid-cols-2 gap-3 pt-1">
                       <button
                         onClick={() => handleViewReport(view.verdict.runId!)}
                         disabled={!view.verdict.runId}
-                        className="flex items-center justify-center gap-1.5 rounded-md border border-panel-line py-2 text-xs font-medium text-fog hover:bg-panel-raised disabled:opacity-50"
+                        className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog transition-all duration-200 hover:border-sentinel/30 hover:bg-panel-raised hover:shadow-glow-sentinel disabled:opacity-40"
                       >
                         <ExternalLink className="h-3.5 w-3.5" />
                         Full report
                       </button>
                       <button
                         onClick={() => setView({ status: "idle", tab })}
-                        className="flex items-center justify-center gap-1.5 rounded-md border border-panel-line py-2 text-xs font-medium text-fog-dim hover:bg-panel-raised"
+                        className="flex items-center justify-center gap-2 rounded-lg border border-panel-line bg-panel py-2.5 text-xs font-medium text-fog-dim transition-all duration-200 hover:bg-panel-raised"
                       >
                         <RotateCcw className="h-3.5 w-3.5" />
                         Dismiss
