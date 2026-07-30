@@ -63,7 +63,7 @@ class RateLimitedError(SentinelAIError):
 
 
 class AllKeysRateLimitedError(RateLimitedError):
-    """Every configured Groq API key returned HTTP 429 for one request.
+    """Every configured OpenRouter API key returned HTTP 429 for one request.
 
     Raised by agent/llm_client.py after it has tried each key in the rotation
     once. Distinct from RateLimitedError so callers (output_node / the API's

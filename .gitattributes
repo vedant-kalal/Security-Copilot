@@ -1,0 +1,5 @@
+# Shell scripts must use LF line endings — CRLF breaks bash (e.g. `set -euo
+# pipefail\r` → "invalid option name"). Force LF regardless of the editor's or
+# git's autocrlf setting.
+*.bash text eol=lf
+*.sh   text eol=lf

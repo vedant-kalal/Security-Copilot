@@ -39,4 +39,6 @@ def save_screenshot(artifact: Optional[dict]) -> Optional[str]:
     filename = f"{datetime.now():%Y%m%d_%H%M%S}_{label}.png"
     path = screenshot_dir / filename
     path.write_bytes(base64.b64decode(screenshot_b64))
-    return str(path)
+    # Return a POSIX-style path (forward slashes) so it's portable and the web
+    # UI can turn it into a /screenshots/<file> URL regardless of OS.
+    return path.as_posix()

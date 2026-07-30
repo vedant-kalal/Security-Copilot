@@ -49,7 +49,7 @@ flowchart LR
     subgraph Agent["LangGraph agent (backend/agent/)"]
         direction TB
         ROUTER["router_node\nblocklist + 24h cache"]
-        AGENT_N["agent_node\nGroq LLM picks the next tool"]
+        AGENT_N["agent_node\nLLM picks the next tool"]
         TOOLS["tools\n(ToolNode)"]
         OUTPUT["output_node\nparse VERDICT / REASON / ...\nwrite cache"]
 
@@ -87,7 +87,7 @@ cd sentinelai-cyber-security
                                # warms the ML model cache, extension npm install + build
 ```
 
-**2. Add your keys** — edit `backend/.env`, set at least `GROQ_API_KEYS` (free, see below):
+**2. Add your keys** — edit `backend/.env`, set at least `OPENROUTER_API_KEYS` (see below):
 
 ```bash
 $EDITOR backend/.env
@@ -113,9 +113,13 @@ python cli.py email    # paste text, then Ctrl-D
 ```
 
 **API keys:**
-- `GROQ_API_KEYS` — required, the agent's LLM. One or more comma-separated free keys; the agent
-  rotates across them round-robin and fails over on rate limits (429). Free tier:
-  https://console.groq.com/keys (the legacy single `GROQ_API_KEY` still works if that's all you set)
+- `OPENROUTER_API_KEYS` — required, the agent's LLM (via OpenRouter, an OpenAI-compatible gateway to many
+  models). One or more comma-separated keys; the agent rotates across them round-robin and fails over on
+  rate limits (429). Get a key at https://openrouter.ai/keys. The default model is
+  `nvidia/nemotron-3-super-120b-a12b:free` — free, fast, and reliable at tool calling (which the agent needs).
+  Change `OPENROUTER_MODEL` to any tool-calling model at https://openrouter.ai/models. A single
+  `OPENROUTER_API_KEY` works too if that's all you set. Note: free models have per-minute/day rate limits —
+  adding more keys (round-robin) or a small OpenRouter credit balance raises them.
 - `VT_API_KEY` — optional, VirusTotal lookups in `domain_reputation`. Degrades gracefully if unset. Free:
   https://www.virustotal.com/gui/join-us
 
@@ -126,7 +130,7 @@ python3 -m venv .venv && source .venv/bin/activate   # venv lives at the repo ro
 pip install torch --index-url https://download.pytorch.org/whl/cpu   # or the cu128 index for a CUDA GPU
 pip install -r backend/requirements.txt
 playwright install chromium
-cd backend && cp .env.example .env   # then fill in GROQ_API_KEYS
+cd backend && cp .env.example .env   # then fill in OPENROUTER_API_KEYS
 uvicorn api.app:app --reload --port 8010
 ```
 
@@ -233,7 +237,7 @@ start_all.bash             Starts just the backend (port-safe — refuses to clo
 
 **Real and tested end-to-end:** the agent (all 4 tools), the router's blocklist/cache fast path, the CLI, the
 FastAPI + web UI, run history + markdown reports, and the Chrome extension — all verified against live services
-(Groq, VirusTotal, WHOIS, DuckDuckGo, real phishing test sites) and, for the extension, loaded into real Chrome.
+(OpenRouter, VirusTotal, WHOIS, DuckDuckGo, real phishing test sites) and, for the extension, loaded into real Chrome.
 
 **Also built and verified:**
 - `backend/network/` — flow collection (`flow_collector.py`), the Isolation Forest (per-row + windowed, with a

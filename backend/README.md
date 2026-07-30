@@ -4,7 +4,7 @@ The security-copilot backend. Flat, one-concern-per-file layout — no
 `app/` wrapper, no ORM, no auth. See project memory
 `security-copilot-spec` for the full build spec and
 `security-copilot-poc-scope` for what's deliberately cut for this POC
-(no DB beyond SQLite, no auth, Groq instead of Claude, terminal-first).
+(no DB beyond SQLite, no auth, OpenRouter instead of Claude, terminal-first).
 
 ## Layout
 
@@ -18,7 +18,7 @@ history.py                  SQLite run history (record_run/list_runs/get_run) �
 
 agent/                The LangGraph graph (spec section 2).
   state.py              The state shape threaded through every node.
-  llm_client.py          Groq chat model factory — the only file that knows about langchain_groq.
+  llm_client.py          OpenRouter (OpenAI-compatible) chat model factory — the only file that imports langchain_openai.
   router_node.py           Deterministic fast path: blocklist + cache.
   agent_node.py              Binds all 4 tools, calls the LLM. System prompt lives here.
   output_node.py               Parses VERDICT/CONFIDENCE/REASON/ALTERNATIVES, writes the cache.
@@ -69,7 +69,7 @@ cd ..   # repo root — the venv lives there, not inside backend/
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 playwright install chromium          # needed by tools/inspect_website.py
-cd backend && cp .env.example .env   # then fill in GROQ_API_KEYS at minimum
+cd backend && cp .env.example .env   # then fill in OPENROUTER_API_KEYS at minimum
 ```
 
 Every time after that — just activate the venv and cd back in:

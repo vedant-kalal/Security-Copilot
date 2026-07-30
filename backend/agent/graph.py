@@ -39,8 +39,8 @@ INCONCLUSIVE_VERDICT = Verdict(
     mitigation=None,
 )
 
-# When every Groq key is throttled, an in-flight case can't be investigated at
-# all. Fail safe to a low-confidence "suspicious" verdict (never "safe") that
+# When every OpenRouter key is throttled, an in-flight case can't be investigated
+# at all. Fail safe to a low-confidence "suspicious" verdict (never "safe") that
 # names the reason, rather than propagating a raw exception to the caller.
 RATE_LIMITED_VERDICT = Verdict(
     label="suspicious",
@@ -100,7 +100,7 @@ async def run_case(case_type: CaseType, raw_input: str, mitre_technique: Optiona
         logger.warning("Case hit the recursion limit (%d) without concluding: %r", settings.AGENT_RECURSION_LIMIT, raw_input)
         return dict(INCONCLUSIVE_VERDICT)
     except AllKeysRateLimitedError:
-        logger.warning("Case could not run — all Groq keys rate-limited: %r", raw_input)
+        logger.warning("Case could not run — all LLM API keys rate-limited: %r", raw_input)
         return dict(RATE_LIMITED_VERDICT)
 
 
@@ -162,7 +162,7 @@ async def run_case_traced(case_type: CaseType, raw_input: str, mitre_technique: 
         logger.warning("Case hit the recursion limit (%d) without concluding: %r", settings.AGENT_RECURSION_LIMIT, raw_input)
         verdict = dict(INCONCLUSIVE_VERDICT)
     except AllKeysRateLimitedError:
-        logger.warning("Case could not run — all Groq keys rate-limited: %r", raw_input)
+        logger.warning("Case could not run — all LLM API keys rate-limited: %r", raw_input)
         verdict = dict(RATE_LIMITED_VERDICT)
 
     report_path = generate_report(case_type, raw_input, tool_call_records, verdict)

@@ -13,7 +13,7 @@
 #
 # Prereqs: run ./download_everything.bash once first (creates .venv at the
 # repo root, installs deps + Chromium), then fill in backend/.env with your
-# GROQ_API_KEYS.
+# OPENROUTER_API_KEYS.
 #
 # Usage:
 #   ./run_all.bash                     # backend + native helper on :8010
@@ -37,13 +37,20 @@ die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 
 cd "$BACKEND_DIR"
 
-[ -f ".env" ] || die "backend/.env not found — run ./download_everything.bash first, then fill in GROQ_API_KEYS."
+[ -f ".env" ] || die "backend/.env not found — run ./download_everything.bash first, then fill in OPENROUTER_API_KEYS."
 
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
+# Resolve the venv's interpreter by absolute path (Windows/git-bash uses
+# Scripts/, Linux/macOS bin/) and invoke everything through it. We deliberately
+# do NOT rely on `activate` rewriting PATH — it silently no-ops when another
+# venv is already active in the parent shell (e.g. a `(.venv)` cmd prompt),
+# which then leaves `uvicorn`/`python` pointing at the wrong environment.
+if   [ -x "$VENV_DIR/Scripts/python.exe" ]; then VENV_PY="$VENV_DIR/Scripts/python.exe"
+elif [ -x "$VENV_DIR/bin/python" ];         then VENV_PY="$VENV_DIR/bin/python"
+else die "Could not find the venv Python under $VENV_DIR (looked in Scripts/ and bin/)."
+fi
 
-grep -qE '^GROQ_API_KEYS?=.+' .env || \
-  warn "No GROQ_API_KEYS (or GROQ_API_KEY) set in backend/.env — the agent will fail on every case. Get free keys at https://console.groq.com/keys"
+grep -qE '^OPENROUTER_API_KEYS?=.+' .env || \
+  warn "No OPENROUTER_API_KEYS (or OPENROUTER_API_KEY) set in backend/.env — the agent will fail on every case. Get a key at https://openrouter.ai/keys"
 
 if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
   exec 3>&-
@@ -55,9 +62,12 @@ fi
 # a synthetic bootstrap model if an artifact is missing, but training real ones
 # gives proper detection quality.
 log "Checking network-anomaly models"
-[ -f "model_artifacts/isolation_forest.joblib" ]        || python "$ROOT_DIR/scripts/train_isolation_forest.py"
-[ -f "model_artifacts/isolation_forest_window.joblib" ] || python "$ROOT_DIR/scripts/train_isolation_forest.py" --feature-set window
-[ -f "model_artifacts/tranad.pt" ]                      || python "$ROOT_DIR/scripts/train_tranad.py"
+# Paths are RELATIVE to backend/ (our cwd) on purpose: on WSL/git-bash the
+# venv's python is a Windows .exe that can't read POSIX absolute paths like
+# /mnt/e/... — but it resolves relative paths against its (translated) cwd fine.
+[ -f "model_artifacts/isolation_forest.joblib" ]        || "$VENV_PY" ../scripts/train_isolation_forest.py
+[ -f "model_artifacts/isolation_forest_window.joblib" ] || "$VENV_PY" ../scripts/train_isolation_forest.py --feature-set window
+[ -f "model_artifacts/tranad.pt" ]                      || "$VENV_PY" ../scripts/train_tranad.py
 
 # The MITRE index is the slow one (first run downloads ~500MB SecureBERT + the
 # ATT&CK STIX bundle). Without it, /report-flow still works — flows just aren't
@@ -67,7 +77,7 @@ if [ ! -f "data/mitre/technique_index.json" ]; then
     warn "MITRE index missing and SKIP_MITRE=1 — flows won't be tagged with an ATT&CK technique."
   else
     log "Building MITRE ATT&CK index (one-time, downloads ~500MB SecureBERT + STIX — grab a coffee)"
-    python -m mitre.build_index
+    "$VENV_PY" -m mitre.build_index
   fi
 fi
 
@@ -80,7 +90,7 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 log "Starting backend on http://127.0.0.1:$PORT"
-uvicorn api.app:app --host 127.0.0.1 --port "$PORT" &
+"$VENV_PY" -m uvicorn api.app:app --host 127.0.0.1 --port "$PORT" &
 BACKEND_PID=$!
 
 # Wait for the backend to accept connections before starting the helper.
@@ -93,7 +103,7 @@ printf " ready.\n"
 
 if [ "$WITH_NATIVE_HOST" = "1" ]; then
   log "Starting native helper (watching local network flows -> /report-flow)"
-  python "$ROOT_DIR/native-host/host.py" --backend-url "http://127.0.0.1:$PORT" &
+  "$VENV_PY" ../native-host/host.py --backend-url "http://127.0.0.1:$PORT" &
   HOST_PID=$!
 else
   warn "Native helper disabled (WITH_NATIVE_HOST=0) — backend only."
@@ -104,8 +114,9 @@ cat <<EOF
   UI / history:      http://127.0.0.1:$PORT/
   Health check:      http://127.0.0.1:$PORT/health
   Extension:         load extension/dist/ as an unpacked extension in chrome://extensions
-  Demo triggers:     python scripts/staged_flow_trigger.py post --backend-url http://127.0.0.1:$PORT
-                     python scripts/replay_attack_flow.py --backend-url http://127.0.0.1:$PORT
+  Demo triggers      (run from the repo root in another terminal):
+    "$VENV_PY" scripts/staged_flow_trigger.py post --backend-url http://127.0.0.1:$PORT
+    "$VENV_PY" scripts/replay_attack_flow.py --backend-url http://127.0.0.1:$PORT
   Stop everything:   Ctrl+C
 EOF
 

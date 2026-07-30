@@ -1,18 +1,18 @@
 """
-Groq chat model factory (spec sections 12/13, rescoped by the
-security-copilot-poc-scope memory: Groq instead of Claude for this POC).
+OpenRouter chat model factory (the agent's LLM).
 
-A single Groq key rate-limits fast — the agent makes several LLM calls
-per case (one per tool-call round trip). This module rotates across all
-configured keys (`settings.groq_api_keys`) round-robin, so load spreads
-proactively, and advances to the next key on any HTTP 429 so a single
-throttled key doesn't fail the whole case. If every key is rate-limited
-for one request it raises `AllKeysRateLimitedError` (a specific exception,
-not a generic one) so the graph can fall back to a clear verdict.
+OpenRouter exposes many providers behind one OpenAI-compatible endpoint,
+so we talk to it with `langchain_openai.ChatOpenAI` pointed at
+`settings.OPENROUTER_BASE_URL`. A single key can rate-limit — the agent
+makes several LLM calls per case (one per tool-call round trip) — so this
+module rotates across all configured keys (`settings.openrouter_api_keys`)
+round-robin, spreading load, and advances to the next key on any HTTP 429
+so one throttled key doesn't fail the whole case. If every key is rate-
+limited for one request it raises `AllKeysRateLimitedError` (a specific
+exception, not a generic one) so the graph can fall back to a clear verdict.
 
-Kept as its own file so swapping the LLM provider later means editing
-only this one file — nothing else in agent/ imports langchain_groq
-directly.
+Kept as its own file so swapping the LLM provider later means editing only
+this one file — nothing else in agent/ imports langchain_openai directly.
 """
 from __future__ import annotations
 
@@ -46,7 +46,7 @@ def _next_start_index(num_keys: int) -> int:
 
 
 def _is_rate_limit(exc: BaseException) -> bool:
-    """Best-effort detection of a Groq HTTP 429 across SDK/langchain wrappings."""
+    """Best-effort detection of an HTTP 429 across SDK/langchain wrappings."""
     status = getattr(exc, "status_code", None)
     if status is None:
         response = getattr(exc, "response", None)
@@ -60,34 +60,41 @@ def _is_rate_limit(exc: BaseException) -> bool:
 
 
 @lru_cache(maxsize=None)
-def _client_for_key(api_key: str, model: str, temperature: float):
-    """One ChatGroq client per key, cached so we don't rebuild on every call."""
-    from langchain_groq import ChatGroq
+def _client_for_key(api_key: str, model: str, base_url: str, temperature: float):
+    """One ChatOpenAI client (pointed at OpenRouter) per key, cached so we don't rebuild on every call."""
+    from langchain_openai import ChatOpenAI
 
-    return ChatGroq(model=model, api_key=api_key, temperature=temperature)
+    return ChatOpenAI(
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        temperature=temperature,
+        # Optional OpenRouter ranking headers — harmless if ignored.
+        default_headers={"X-Title": "security-copilot"},
+    )
 
 
-class _RotatingGroqLLM:
-    """Drop-in stand-in for a ChatGroq instance that rotates keys on 429.
+class _RotatingChatLLM:
+    """Drop-in stand-in for a ChatOpenAI instance that rotates keys on 429.
 
     Exposes just the surface agent_node.py uses — `bind_tools()` and
-    `invoke()` — delegating to a real ChatGroq client under the hood while
-    handling key selection and rate-limit retry.
+    `invoke()` — delegating to a real ChatOpenAI (OpenRouter) client under the
+    hood while handling key selection and rate-limit retry.
     """
 
     def __init__(self, tools: Optional[Sequence[Any]] = None) -> None:
         self._tools = tools
 
-    def bind_tools(self, tools: Sequence[Any]) -> "_RotatingGroqLLM":
-        return _RotatingGroqLLM(tools=tools)
+    def bind_tools(self, tools: Sequence[Any]) -> "_RotatingChatLLM":
+        return _RotatingChatLLM(tools=tools)
 
     def invoke(self, messages: Any, **kwargs: Any) -> Any:
         settings = get_settings()
-        keys = settings.groq_api_keys
+        keys = settings.openrouter_api_keys
         if not keys:
             raise RuntimeError(
-                "No Groq API keys configured. Set GROQ_API_KEYS (comma-separated) — or the "
-                "legacy GROQ_API_KEY — in backend/.env. Free keys: https://console.groq.com/keys"
+                "No OpenRouter API keys configured. Set OPENROUTER_API_KEYS (comma-separated) — or the "
+                "single OPENROUTER_API_KEY — in backend/.env. Get a key at https://openrouter.ai/keys"
             )
 
         num_keys = len(keys)
@@ -98,25 +105,25 @@ class _RotatingGroqLLM:
         # on every 429, up to len(keys) attempts total.
         for attempt in range(num_keys):
             idx = (start + attempt) % num_keys
-            client = _client_for_key(keys[idx], settings.GROQ_MODEL, 0.0)
+            client = _client_for_key(keys[idx], settings.OPENROUTER_MODEL, settings.OPENROUTER_BASE_URL, 0.0)
             if self._tools:
                 client = client.bind_tools(self._tools)
             try:
-                logger.debug("Groq call using key index %d (attempt %d/%d)", idx, attempt + 1, num_keys)
+                logger.debug("OpenRouter call using key index %d (attempt %d/%d)", idx, attempt + 1, num_keys)
                 return client.invoke(messages, **kwargs)
             except Exception as exc:  # noqa: BLE001 — re-raised below if not a 429
                 if _is_rate_limit(exc):
-                    logger.warning("Groq key index %d hit a 429; rotating to the next key", idx)
+                    logger.warning("OpenRouter key index %d hit a 429; rotating to the next key", idx)
                     last_exc = exc
                     continue
                 raise
 
         raise AllKeysRateLimitedError(
-            f"All {num_keys} configured Groq API key(s) are rate-limited. Try again shortly."
+            f"All {num_keys} configured OpenRouter API key(s) are rate-limited. Try again shortly."
         ) from last_exc
 
 
 @lru_cache
-def get_llm() -> _RotatingGroqLLM:
+def get_llm() -> _RotatingChatLLM:
     """Return a process-wide singleton rotating chat model, not yet bound to any tools."""
-    return _RotatingGroqLLM()
+    return _RotatingChatLLM()

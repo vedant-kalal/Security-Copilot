@@ -8,7 +8,7 @@ and hand back its actual official site(s) — so the verdict isn't just
 
 Uses `ddgs` (DuckDuckGo search) — keyless, free, no signup. Deliberately
 not a paid/API-key search provider (Tavily, Google Custom Search, Bing):
-this project already requires GROQ_API_KEY and optionally accepts
+this project already requires OPENROUTER_API_KEYS and optionally accepts
 VT_API_KEY; a third mandatory key for a "nice to have" feature isn't a
 good trade. Same graceful-degrade shape as every other tool here if the
 lookup fails for any reason.

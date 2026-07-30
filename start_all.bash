@@ -21,18 +21,24 @@ die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 
 cd "$BACKEND_DIR"
 
-[ -f ".env" ] || die "backend/.env not found — run ./download_everything.bash first, then fill in GROQ_API_KEYS."
+[ -f ".env" ] || die "backend/.env not found — run ./download_everything.bash first, then fill in OPENROUTER_API_KEYS."
 
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
+# Resolve the venv's interpreter by absolute path and invoke uvicorn through it
+# (Windows/git-bash uses Scripts/, Linux/macOS bin/). We don't rely on `activate`
+# rewriting PATH — it silently no-ops when another venv is already active in the
+# parent shell (e.g. a `(.venv)` cmd prompt).
+if   [ -x "$VENV_DIR/Scripts/python.exe" ]; then VENV_PY="$VENV_DIR/Scripts/python.exe"
+elif [ -x "$VENV_DIR/bin/python" ];         then VENV_PY="$VENV_DIR/bin/python"
+else die "Could not find the venv Python under $VENV_DIR (looked in Scripts/ and bin/)."
+fi
 
 if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
   exec 3>&-
   die "Something is already listening on 127.0.0.1:$PORT (likely an unrelated project — this repo defaults to 8010 to avoid the usual 8000/8001 collisions). Stop it first, or run with PORT=<free-port> ./start_all.bash."
 fi
 
-if ! grep -qE '^GROQ_API_KEYS?=.+' .env; then
-  printf '\033[1;33m!! No GROQ_API_KEYS (or GROQ_API_KEY) set in backend/.env — the agent will fail on every case. Get free keys at https://console.groq.com/keys\033[0m\n'
+if ! grep -qE '^OPENROUTER_API_KEYS?=.+' .env; then
+  printf '\033[1;33m!! No OPENROUTER_API_KEYS (or OPENROUTER_API_KEY) set in backend/.env — the agent will fail on every case. Get a key at https://openrouter.ai/keys\033[0m\n'
 fi
 
 log "Starting security-copilot backend on http://127.0.0.1:$PORT"
@@ -44,4 +50,4 @@ cat <<EOF
   Stop this server:   Ctrl+C
 EOF
 
-exec uvicorn api.app:app --host 127.0.0.1 --port "$PORT" --reload
+exec "$VENV_PY" -m uvicorn api.app:app --host 127.0.0.1 --port "$PORT" --reload

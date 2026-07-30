@@ -804,7 +804,9 @@ function escapeHtml(s) {
 
 function screenshotUrl(path) {
   if (!path) return null;
-  const filename = path.split('/').pop();
+  // Paths may use either separator (Windows saves them with backslashes); split
+  // on both so we always end up with just the filename the /screenshots mount serves.
+  const filename = path.split(/[\\/]/).pop();
   return `/screenshots/${filename}`;
 }
 
