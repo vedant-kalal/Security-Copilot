@@ -1,48 +1,26 @@
 """
 OpenRouter chat model factory (the agent's LLM).
 
-OpenRouter exposes many providers behind one OpenAI-compatible endpoint,
-so we talk to it with `langchain_openai.ChatOpenAI` pointed at
-`settings.OPENROUTER_BASE_URL`. A single key can rate-limit — the agent
-makes several LLM calls per case (one per tool-call round trip) — so this
-module rotates across all configured keys (`settings.openrouter_api_keys`)
-round-robin, spreading load, and advances to the next key on any HTTP 429
-so one throttled key doesn't fail the whole case. If every key is rate-
-limited for one request it raises `AllKeysRateLimitedError` (a specific
-exception, not a generic one) so the graph can fall back to a clear verdict.
+OpenRouter exposes many providers behind one OpenAI-compatible endpoint, so
+we talk to it with `langchain_openai.ChatOpenAI` pointed at
+`settings.OPENROUTER_BASE_URL`, authenticated with `settings.OPENROUTER_API_KEY`.
+A single process-wide client, no key rotation — if OpenRouter returns a 429,
+`_RateLimitedLLM` (below) turns it into `LLMRateLimitedError` so `agent/graph.py`
+can fail safe to a low-confidence verdict instead of a bare stack trace.
 
 Kept as its own file so swapping the LLM provider later means editing only
 this one file — nothing else in agent/ imports langchain_openai directly.
 """
 from __future__ import annotations
 
-import itertools
-import threading
 from functools import lru_cache
 from typing import Any, Optional, Sequence
 
 from config import get_settings
-from exceptions import AllKeysRateLimitedError
+from exceptions import LLMRateLimitedError
 from logger import get_logger
 
 logger = get_logger(__name__)
-
-# Round-robin cursor shared across all threads. An itertools.cycle guarded by
-# a lock hands out successive start indices so consecutive calls begin on
-# different keys — balancing load proactively rather than only reacting to 429s.
-_index_lock = threading.Lock()
-_key_cycle: Optional["itertools.cycle[int]"] = None
-_cycle_len: int = 0
-
-
-def _next_start_index(num_keys: int) -> int:
-    """Return the next key index to start a request on (thread-safe, round-robin)."""
-    global _key_cycle, _cycle_len
-    with _index_lock:
-        if _key_cycle is None or _cycle_len != num_keys:
-            _key_cycle = itertools.cycle(range(num_keys))
-            _cycle_len = num_keys
-        return next(_key_cycle)
 
 
 def _is_rate_limit(exc: BaseException) -> bool:
@@ -59,71 +37,53 @@ def _is_rate_limit(exc: BaseException) -> bool:
     return "429" in text or "rate limit" in text or "rate_limit" in text
 
 
-@lru_cache(maxsize=None)
-def _client_for_key(api_key: str, model: str, base_url: str, temperature: float):
-    """One ChatOpenAI client (pointed at OpenRouter) per key, cached so we don't rebuild on every call."""
+@lru_cache
+def _client():
+    """The real ChatOpenAI client (pointed at OpenRouter), built once."""
     from langchain_openai import ChatOpenAI
 
+    settings = get_settings()
+    if not settings.OPENROUTER_API_KEY:
+        raise RuntimeError(
+            "No OpenRouter API key configured. Set OPENROUTER_API_KEY in backend/.env. "
+            "Get one at https://openrouter.ai/keys"
+        )
+
     return ChatOpenAI(
-        model=model,
-        api_key=api_key,
-        base_url=base_url,
-        temperature=temperature,
+        model=settings.OPENROUTER_MODEL,
+        api_key=settings.OPENROUTER_API_KEY,
+        base_url=settings.OPENROUTER_BASE_URL,
+        temperature=0.0,
         # Optional OpenRouter ranking headers — harmless if ignored.
         default_headers={"X-Title": "security-copilot"},
     )
 
 
-class _RotatingChatLLM:
-    """Drop-in stand-in for a ChatOpenAI instance that rotates keys on 429.
-
-    Exposes just the surface agent_node.py uses — `bind_tools()` and
-    `invoke()` — delegating to a real ChatOpenAI (OpenRouter) client under the
-    hood while handling key selection and rate-limit retry.
-    """
+class _RateLimitedLLM:
+    """Thin wrapper around the ChatOpenAI client that turns a 429 into
+    `LLMRateLimitedError` instead of letting the SDK's raw exception (or a
+    generic 500) reach the caller."""
 
     def __init__(self, tools: Optional[Sequence[Any]] = None) -> None:
         self._tools = tools
 
-    def bind_tools(self, tools: Sequence[Any]) -> "_RotatingChatLLM":
-        return _RotatingChatLLM(tools=tools)
+    def bind_tools(self, tools: Sequence[Any]) -> "_RateLimitedLLM":
+        return _RateLimitedLLM(tools=tools)
 
     def invoke(self, messages: Any, **kwargs: Any) -> Any:
-        settings = get_settings()
-        keys = settings.openrouter_api_keys
-        if not keys:
-            raise RuntimeError(
-                "No OpenRouter API keys configured. Set OPENROUTER_API_KEYS (comma-separated) — or the "
-                "single OPENROUTER_API_KEY — in backend/.env. Get a key at https://openrouter.ai/keys"
-            )
-
-        num_keys = len(keys)
-        start = _next_start_index(num_keys)
-        last_exc: Optional[BaseException] = None
-
-        # Try each key once, starting at the round-robin cursor and advancing
-        # on every 429, up to len(keys) attempts total.
-        for attempt in range(num_keys):
-            idx = (start + attempt) % num_keys
-            client = _client_for_key(keys[idx], settings.OPENROUTER_MODEL, settings.OPENROUTER_BASE_URL, 0.0)
-            if self._tools:
-                client = client.bind_tools(self._tools)
-            try:
-                logger.debug("OpenRouter call using key index %d (attempt %d/%d)", idx, attempt + 1, num_keys)
-                return client.invoke(messages, **kwargs)
-            except Exception as exc:  # noqa: BLE001 — re-raised below if not a 429
-                if _is_rate_limit(exc):
-                    logger.warning("OpenRouter key index %d hit a 429; rotating to the next key", idx)
-                    last_exc = exc
-                    continue
-                raise
-
-        raise AllKeysRateLimitedError(
-            f"All {num_keys} configured OpenRouter API key(s) are rate-limited. Try again shortly."
-        ) from last_exc
+        client = _client()
+        if self._tools:
+            client = client.bind_tools(self._tools)
+        try:
+            return client.invoke(messages, **kwargs)
+        except Exception as exc:  # noqa: BLE001 — re-raised below if not a 429
+            if _is_rate_limit(exc):
+                logger.warning("OpenRouter rate-limited this request (HTTP 429)")
+                raise LLMRateLimitedError("OpenRouter is rate-limiting this API key. Try again shortly.") from exc
+            raise
 
 
 @lru_cache
-def get_llm() -> _RotatingChatLLM:
-    """Return a process-wide singleton rotating chat model, not yet bound to any tools."""
-    return _RotatingChatLLM()
+def get_llm() -> _RateLimitedLLM:
+    """Return a process-wide singleton chat model, not yet bound to any tools."""
+    return _RateLimitedLLM()

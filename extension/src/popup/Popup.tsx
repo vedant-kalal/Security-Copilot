@@ -86,14 +86,22 @@ export function Popup() {
 
   async function applyVerdict(tab: ActiveTab, verdict: TabVerdict) {
     await setTabVerdict(tab.id, verdict);
-    await chrome.action.setBadgeText({
-      tabId: tab.id,
-      text: verdict.label === "dangerous" || verdict.label === "suspicious" ? "!" : "",
-    });
-    await chrome.action.setBadgeBackgroundColor({
-      tabId: tab.id,
-      color: verdict.label === "dangerous" ? "#EF4444" : "#F5A623",
-    });
+    // The tab can close mid-investigation (a 10-30s full check) — badging a
+    // tab that no longer exists throws, but that's not a reason to treat an
+    // otherwise-successful verdict as a failure, so it's isolated here.
+    try {
+      await chrome.action.setBadgeText({
+        tabId: tab.id,
+        text: verdict.label === "dangerous" || verdict.label === "suspicious" ? "!" : "",
+      });
+      await chrome.action.setBadgeBackgroundColor({
+        tabId: tab.id,
+        color: verdict.label === "dangerous" ? "#EF4444" : "#F5A623",
+      });
+    } catch {
+      // Tab closed before the badge could be set — the verdict itself is
+      // still valid and gets shown/stored below.
+    }
     setView({ status: "result", tab, verdict });
   }
 
@@ -270,8 +278,12 @@ export function Popup() {
                           <div>
                             <p className={`text-sm font-bold capitalize ${color}`}>{view.verdict.label}</p>
                             <p className="mt-0.5 font-mono text-xs text-fog-faint">
-                              {view.verdict.kind === "link" ? "URL check" : "Page text check"} &middot;{" "}
-                              {Math.round(view.verdict.confidence * 100)}% confidence
+                              {view.verdict.kind === "link"
+                                ? "URL check"
+                                : view.verdict.kind === "email"
+                                  ? "Page text check"
+                                  : "Automatic quick scan"}{" "}
+                              &middot; {Math.round(view.verdict.confidence * 100)}% confidence
                             </p>
                           </div>
                         </div>

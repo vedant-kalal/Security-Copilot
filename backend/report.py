@@ -70,6 +70,12 @@ def _format_domain_reputation(artifact: dict, _screenshot_path: Optional[str]) -
             f"- **VirusTotal:** {vt.get('malicious_count')} malicious, {vt.get('suspicious_count')} suspicious, "
             f"{vt.get('harmless_count')} harmless (reputation score {vt.get('reputation_score')})"
         )
+        for f in vt.get("flagged_by") or []:
+            lines.append(f"  - {f.get('vendor')}: **{f.get('category')}** ({f.get('result')})")
+        categories = vt.get("categories") or {}
+        if categories:
+            cat_str = ", ".join(f"{vendor}: {label}" for vendor, label in categories.items())
+            lines.append(f"- **Threat categorization:** {cat_str}")
     else:
         lines.append(f"- **VirusTotal:** unavailable ({vt.get('detail')})")
 

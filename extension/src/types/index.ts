@@ -34,3 +34,24 @@ export interface RunSummary {
     reason?: string;
   };
 }
+
+/** POST /quick-check-url response (api/routes_quick_check.py) — the fast,
+ * local, ML-only pre-check background.ts runs on every navigation. No
+ * run_id: it never touches history.py, only the full agent does that. */
+export interface QuickCheckResponse {
+  label: "dangerous" | "suspicious" | "safe" | "unknown";
+  confidence: number;
+  source: "cache" | "blocklist" | "ml_model" | "error";
+  detail?: string;
+}
+
+/** Messages passed between background.ts (which owns navigation events and
+ * the backend calls) and content.ts (which owns the in-page banner). */
+export type BackgroundToContentMessage =
+  | { type: "SHOW_BANNER"; url: string; label: "dangerous" | "suspicious"; confidence: number }
+  | { type: "HIDE_BANNER" }
+  | { type: "FULL_CHECK_STARTED" }
+  | { type: "FULL_CHECK_DONE"; runId: string; label: string; confidence: number }
+  | { type: "FULL_CHECK_FAILED"; message: string };
+
+export type ContentToBackgroundMessage = { type: "RUN_FULL_CHECK"; url: string };

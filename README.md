@@ -87,7 +87,7 @@ cd sentinelai-cyber-security
                                # warms the ML model cache, extension npm install + build
 ```
 
-**2. Add your keys** — edit `backend/.env`, set at least `OPENROUTER_API_KEYS` (see below):
+**2. Add your key** — edit `backend/.env`, set `OPENROUTER_API_KEY` (see below):
 
 ```bash
 $EDITOR backend/.env
@@ -113,13 +113,11 @@ python cli.py email    # paste text, then Ctrl-D
 ```
 
 **API keys:**
-- `OPENROUTER_API_KEYS` — required, the agent's LLM (via OpenRouter, an OpenAI-compatible gateway to many
-  models). One or more comma-separated keys; the agent rotates across them round-robin and fails over on
-  rate limits (429). Get a key at https://openrouter.ai/keys. The default model is
-  `nvidia/nemotron-3-super-120b-a12b:free` — free, fast, and reliable at tool calling (which the agent needs).
-  Change `OPENROUTER_MODEL` to any tool-calling model at https://openrouter.ai/models. A single
-  `OPENROUTER_API_KEY` works too if that's all you set. Note: free models have per-minute/day rate limits —
-  adding more keys (round-robin) or a small OpenRouter credit balance raises them.
+- `OPENROUTER_API_KEY` — required, the agent's LLM (via OpenRouter, an OpenAI-compatible gateway to many
+  models). Get a key at https://openrouter.ai/keys. The default model is `openai/gpt-oss-120b` — reliable at
+  tool calling (which the agent needs). Change `OPENROUTER_MODEL` to any tool-calling model at
+  https://openrouter.ai/models. If OpenRouter rate-limits the key (429), the case fails safe to a
+  low-confidence "suspicious, try again" verdict instead of crashing.
 - `VT_API_KEY` — optional, VirusTotal lookups in `domain_reputation`. Degrades gracefully if unset. Free:
   https://www.virustotal.com/gui/join-us
 
@@ -130,7 +128,7 @@ python3 -m venv .venv && source .venv/bin/activate   # venv lives at the repo ro
 pip install torch --index-url https://download.pytorch.org/whl/cpu   # or the cu128 index for a CUDA GPU
 pip install -r backend/requirements.txt
 playwright install chromium
-cd backend && cp .env.example .env   # then fill in OPENROUTER_API_KEYS
+cd backend && cp .env.example .env   # then fill in OPENROUTER_API_KEY
 uvicorn api.app:app --reload --port 8010
 ```
 

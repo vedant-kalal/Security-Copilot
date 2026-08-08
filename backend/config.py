@@ -40,51 +40,21 @@ class Settings(BaseSettings):
         return value
 
     # --- LLM (agent) — OpenRouter (OpenAI-compatible API) -----------------
-    # OpenRouter exposes many providers behind one OpenAI-compatible endpoint.
-    # A single key can rate-limit (the agent makes several LLM calls per case,
-    # one per tool-call round trip), so OPENROUTER_API_KEYS holds one or more
-    # keys (comma-separated) and agent/llm_client.py rotates across them round-
-    # robin, advancing on any 429. OPENROUTER_API_KEY (singular) is honored as a
-    # fallback — see the `openrouter_api_keys` property below, the single source
-    # of truth every caller should read.
-    OPENROUTER_API_KEYS: str | List[str] = Field(
-        default_factory=list,
-        description="Comma-separated OpenRouter keys for round-robin rotation. Get one at https://openrouter.ai/keys",
-    )
+    # OpenRouter exposes many providers behind one OpenAI-compatible endpoint;
+    # agent/llm_client.py talks to it via langchain_openai.ChatOpenAI pointed
+    # at OPENROUTER_BASE_URL.
     OPENROUTER_API_KEY: str = Field(
         default="",
-        description="Single-key fallback. Prefer OPENROUTER_API_KEYS. Key: https://openrouter.ai/keys",
+        description="Required. Get one at https://openrouter.ai/keys",
     )
     OPENROUTER_MODEL: str = Field(
-        default="nvidia/nemotron-3-super-120b-a12b:free",
+        default="openai/gpt-oss-120b",
         description="Must support tool calling (the agent binds tools). Browse models at https://openrouter.ai/models",
     )
     OPENROUTER_BASE_URL: str = Field(
         default="https://openrouter.ai/api/v1",
         description="OpenAI-compatible base URL for OpenRouter.",
     )
-
-    @field_validator("OPENROUTER_API_KEYS", mode="before")
-    @classmethod
-    def _split_openrouter_keys(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [key.strip() for key in value.split(",") if key.strip()]
-        return value
-
-    @property
-    def openrouter_api_keys(self) -> List[str]:
-        """The effective, de-duplicated key list every caller should use.
-
-        Prefers OPENROUTER_API_KEYS; falls back to the singular OPENROUTER_API_KEY
-        so a one-key `.env` works unchanged. Order is preserved (rotation starts
-        at the first key) and duplicates are dropped.
-        """
-        keys = list(self.OPENROUTER_API_KEYS) if isinstance(self.OPENROUTER_API_KEYS, list) else []
-        if self.OPENROUTER_API_KEY and self.OPENROUTER_API_KEY not in keys:
-            keys.append(self.OPENROUTER_API_KEY)
-        # De-dup while preserving order.
-        seen: set[str] = set()
-        return [k for k in keys if not (k in seen or seen.add(k))]
     # LangGraph's recursion_limit counts every node hop, not just agent<->tools
     # round trips — router + (agent, tools) per tool call + a final agent
     # response + output. 15 comfortably covers spec's "~5 loop iterations"

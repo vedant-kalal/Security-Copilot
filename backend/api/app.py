@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from api.routes_check_email import router as check_email_router
 from api.routes_check_links import router as check_links_router
 from api.routes_health import router as health_router
+from api.routes_quick_check import router as quick_check_router
 from api.routes_report_flow import router as report_flow_router
 from api.routes_runs import router as runs_router
 from config import get_settings
@@ -57,6 +58,7 @@ def create_app() -> FastAPI:
     app.include_router(health_router)
     app.include_router(check_links_router)
     app.include_router(check_email_router)
+    app.include_router(quick_check_router)
     app.include_router(report_flow_router)
     app.include_router(runs_router)
 

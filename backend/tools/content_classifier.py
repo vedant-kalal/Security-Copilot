@@ -63,7 +63,7 @@ def _get_onnx_session():
     return _onnx_session
 
 
-def _score_url(url: str) -> dict:
+def score_url(url: str) -> dict:
     import numpy as np
 
     session = _get_onnx_session()
@@ -116,7 +116,7 @@ async def content_classifier(text: str) -> dict:
 
     try:
         if _looks_like_bare_url(text):
-            return await asyncio.to_thread(_score_url, text.strip())
+            return await asyncio.to_thread(score_url, text.strip())
         return await asyncio.to_thread(_score_text, text)
     except Exception as exc:  # noqa: BLE001 - a model-loading hiccup should degrade, not crash the agent loop
         logger.warning("content_classifier failed: %s", exc)

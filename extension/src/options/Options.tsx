@@ -1,4 +1,4 @@
-import { Save, ShieldHalf } from "lucide-react";
+import { Radar, Save, ShieldHalf } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -7,11 +7,13 @@ import { getStorage, setStorage } from "@/lib/storage";
 export function Options() {
   const [apiBaseUrl, setApiBaseUrl] = useState("http://127.0.0.1:8010");
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
+  const [autoScanEnabled, setAutoScanEnabled] = useState(true);
 
   useEffect(() => {
     void (async () => {
       const storage = await getStorage();
       setApiBaseUrl(storage.apiBaseUrl);
+      setAutoScanEnabled(storage.autoScanEnabled);
     })();
   }, []);
 
@@ -20,6 +22,12 @@ export function Options() {
     await setStorage({ apiBaseUrl: apiBaseUrl.replace(/\/+$/, "") });
     setSavedMessage("Saved.");
     setTimeout(() => setSavedMessage(null), 2000);
+  }
+
+  async function toggleAutoScan() {
+    const next = !autoScanEnabled;
+    setAutoScanEnabled(next);
+    await setStorage({ autoScanEnabled: next });
   }
 
   return (
@@ -34,6 +42,37 @@ export function Options() {
           <ThemeToggle />
         </div>
       </div>
+
+      {/* ── Automatic scanning card ────────────────────────────── */}
+      <section className="glass rounded-xl border border-panel-line p-6 shadow-card">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="flex items-center gap-2 font-display text-sm font-bold text-fog">
+              <Radar className="h-4 w-4 text-sentinel" />
+              Automatic scanning
+            </h2>
+            <p className="mt-1.5 text-xs leading-relaxed text-fog-faint">
+              Checks every page you navigate to with a fast, local ML model (no LLM call, no cost). Shows an
+              in-page banner only when a page looks suspicious or dangerous — safe pages stay silent. Click{" "}
+              <span className="text-fog">Full report</span> on a banner to run the complete investigation.
+            </p>
+          </div>
+          <button
+            role="switch"
+            aria-checked={autoScanEnabled}
+            onClick={toggleAutoScan}
+            className={`relative h-6 w-11 shrink-0 rounded-full border transition-colors duration-200 ${
+              autoScanEnabled ? "border-sentinel bg-sentinel/30" : "border-panel-line bg-panel-raised"
+            }`}
+          >
+            <span
+              className={`absolute top-0.5 h-4 w-4 rounded-full bg-fog transition-transform duration-200 ${
+                autoScanEnabled ? "translate-x-[22px] bg-sentinel" : "translate-x-0.5"
+              }`}
+            />
+          </button>
+        </div>
+      </section>
 
       {/* ── Backend config card ──────────────────────────────── */}
       <section className="glass rounded-xl border border-panel-line p-6 shadow-card">

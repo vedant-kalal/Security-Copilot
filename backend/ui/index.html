@@ -906,6 +906,31 @@ function renderDomainReputation(a) {
       `;
     }
     html += `<div class="field"><b>Reputation score:</b> ${vt.reputation_score}</div>`;
+    if (vt.community_reputation !== null && vt.community_reputation !== undefined) {
+      html += `<div class="field"><b>VT community reputation:</b> ${vt.community_reputation}</div>`;
+    }
+
+    /* ── Per-vendor detections: WHAT each engine actually flagged, not ── */
+    /* just how many did (VT aggregates ~70-90 independent AV/URL-rep engines). */
+    const flaggedBy = vt.flagged_by || [];
+    if (flaggedBy.length) {
+      html += `<div class="field" style="margin-top:10px;"><b>Flagged by (what each vendor found):</b></div>`;
+      flaggedBy.forEach(f => {
+        const badgeClass = f.category === 'malicious' ? 'dangerous' : 'suspicious';
+        html += `<div class="link-item">${badge(badgeClass)} <b>${escapeHtml(f.vendor)}</b> &mdash; ${escapeHtml(f.result || f.category || '')}</div>`;
+      });
+    }
+
+    /* ── Threat categorization: dedicated web-categorization vendors' own ── */
+    /* label for the domain (phishing, spam, etc.) — separate from the AV engines above. */
+    const categories = vt.categories || {};
+    const categoryEntries = Object.entries(categories);
+    if (categoryEntries.length) {
+      html += `<div class="field" style="margin-top:10px;"><b>Threat categorization:</b></div>`;
+      categoryEntries.forEach(([vendor, label]) => {
+        html += `<div class="link-item">${escapeHtml(vendor)}: <b>${escapeHtml(label)}</b></div>`;
+      });
+    }
   } else {
     html += `<div class="field"><b>VirusTotal:</b> unavailable (${escapeHtml(vt.detail)})</div>`;
   }
