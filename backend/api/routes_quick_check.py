@@ -11,21 +11,33 @@ cheapest first:
   2. The static blocklist (cache/blocklist.py) — known-bad domains.
   3. content_classifier's URL-only ONNX model, called directly — the same
      model the full agent uses, skipping the agent/LLM loop.
-  4. If the model didn't already say "dangerous," corroborate with
-     VirusTotal (skipped only if VT_API_KEY is unset, or already resolved
-     from this endpoint's own short-lived cache below).
+  4. Corroborate with VirusTotal in both directions (skipped only if
+     VT_API_KEY is unset, or already resolved from this endpoint's own
+     short-lived cache below) — escalate a too-lenient ML verdict, or
+     de-escalate a too-harsh one.
 
-Step 4 exists because the ONNX model alone misses real, currently-active
-phishing sites VirusTotal already has plenty of signal on (verified
-2026-08: a live phishing storefront scored 0.10 — "safe" — from the URL
-string alone, while VT already had 15 reputable vendors, including
-Kaspersky/ESET/Fortinet/Sophos, calling it phishing). The escalation rule
-uses VT's raw *malicious vendor count*, not its ratio-based
+Step 4 exists because the ONNX model is URL-string-only (no domain age,
+no reputation, nothing about who actually operates the site), and gets
+both kinds of call wrong on real sites:
+  - Verified 2026-08: a live phishing storefront scored 0.10 — "safe" —
+    from the URL string alone, while VT already had 15 reputable vendors,
+    including Kaspersky/ESET/Fortinet/Sophos, calling it phishing.
+  - Verified 2026-08: `https://chat.google.com/app/home` scored 0.88 —
+    "dangerous" — purely because of its URL shape (subdomain + short app
+    path, a pattern phishing kits also use), while VT shows 0 malicious/
+    suspicious vendors and 59 actively calling the domain harmless.
+
+Both corrections use VT's raw vendor *counts*, not its ratio-based
 reputation_score: that score divides by every engine VT queried, most of
 which simply never evaluated the domain rather than actively vouching for
-it, so a handful of reputable vendors actively agreeing gets diluted into
-looking unremarkable. A few vendors actively calling something phishing is
-meaningful on its own, regardless of how many others stayed silent.
+it either way, so a handful of vendors actively agreeing (in either
+direction) gets diluted into looking unremarkable. A few vendors actively
+calling something phishing — or a large number actively calling it
+harmless — is meaningful on its own, regardless of how many others stayed
+silent. That's also why the de-escalation rule requires a real count of
+harmless votes rather than just "malicious_count == 0": VT simply not
+having evaluated a domain yet (a brand-new phishing domain, say) must not
+read the same as VT having looked and vouched for it.
 
 VirusTotal's free tier is rate-limited (roughly 4 req/min, 500/day), and
 without caching, a user revisiting their own regularly-used sites would
@@ -58,10 +70,22 @@ logger = get_logger(__name__)
 _DANGEROUS_THRESHOLD = 0.7
 _SUSPICIOUS_THRESHOLD = 0.4
 
-# Absolute VirusTotal vendor-count thresholds for escalation — see module
-# docstring for why this is a count, not VT's own ratio-based score.
+# Absolute VirusTotal vendor-count thresholds for escalation/de-escalation —
+# see module docstring for why these are counts, not VT's own ratio-based
+# score.
 _VT_DANGEROUS_MALICIOUS_COUNT = 3
 _VT_SUSPICIOUS_MALICIOUS_COUNT = 1
+# De-escalation is the riskier direction to get wrong (clearing a verdict
+# that was actually correct costs a lot more than leaving a false alarm up
+# a little longer), so the bar is deliberately high: a real, substantial
+# number of vendors must have actively vouched for the domain. A single
+# stray malicious/suspicious vote is tolerated rather than blocking the
+# override outright — verified 2026-08 that heavily-impersonated real
+# domains (login.microsoftonline.com, web.whatsapp.com) each carry exactly
+# one low-quality vendor's false positive alongside ~58 harmless votes;
+# requiring a hard zero would leave those permanently misflagged.
+_VT_HARMLESS_OVERRIDE_COUNT = 20
+_VT_HARMLESS_OVERRIDE_MAX_BAD = 1
 
 _VT_CACHE_TTL_SECONDS = 6 * 3600
 _vt_cache: dict[str, tuple[float, dict]] = {}
@@ -122,13 +146,16 @@ async def quick_check_url(payload: QuickCheckRequest) -> dict:
     ml_score = ml_result.get("phishing_score", 0.0)
     ml_label = _label_for_score(ml_score)
 
-    if ml_label == "dangerous" or not get_settings().VT_API_KEY:
+    if not get_settings().VT_API_KEY:
         return {"label": ml_label, "confidence": ml_score, "source": "ml_model"}
 
-    # The URL string alone didn't ring a strong bell — corroborate with
-    # VirusTotal before settling on "safe". Fast (no headless browser, no
-    # LLM) and cached per-domain, so this doesn't slow the common case down
-    # by more than a fraction of a second after the first visit.
+    # Corroborate with VirusTotal either way — the URL-only model has no
+    # domain history or reputation, so it can be too lenient (misses a live
+    # phishing site) just as easily as too harsh (flags a legitimate site
+    # whose URL shape happens to look phishy, e.g. a SaaS app's subdomain +
+    # short path). Fast (no headless browser, no LLM) and cached per-domain,
+    # so this doesn't slow the common case down by more than a fraction of a
+    # second after the first visit.
     domain = extract_domain(payload.url)
     vt_result = await _vt_lookup_cached(domain)
     if not vt_result.get("available"):
@@ -141,5 +168,17 @@ async def quick_check_url(payload: QuickCheckRequest) -> dict:
             domain, ml_label, ml_score, vt_result.get("malicious_count", 0),
         )
         return {"label": vt_label, "confidence": vt_confidence, "source": "virustotal"}
+
+    vt_bad_count = vt_result.get("malicious_count", 0) + vt_result.get("suspicious_count", 0)
+    if (
+        ml_label != "safe"
+        and vt_bad_count <= _VT_HARMLESS_OVERRIDE_MAX_BAD
+        and vt_result.get("harmless_count", 0) >= _VT_HARMLESS_OVERRIDE_COUNT
+    ):
+        logger.info(
+            "quick-check de-escalated %s: ML said %s (%.2f), VT found %d vendors actively vouching it's harmless (vs %d flagging it)",
+            domain, ml_label, ml_score, vt_result.get("harmless_count", 0), vt_bad_count,
+        )
+        return {"label": "safe", "confidence": vt_result.get("reputation_score", 0.0), "source": "virustotal"}
 
     return {"label": ml_label, "confidence": ml_score, "source": "ml_model"}
