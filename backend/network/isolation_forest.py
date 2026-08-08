@@ -93,9 +93,15 @@ def _synthetic_baseline(feature_set: str, n_samples: int, seed: int = 42) -> np.
         proto_tcp = np.clip(rng.normal(0.9, 0.08, n_samples), 0, 1)
         proto_udp = np.clip(1.0 - proto_tcp, 0, 1)
         return np.column_stack([conn, dest, port, failed, np.sin(angle), np.cos(angle), proto_tcp, proto_udp])
-    # csv feature set
-    means = [1.2, 6.0, 6.0, 550.0, 550.0, 1100.0, 11.0, 443.0, 105.0, 1.0]
-    stds = [0.6, 2.5, 2.5, 220.0, 220.0, 450.0, 4.5, 220.0, 35.0, 0.6]
+    # csv feature set — order must track FEATURE_NAMES in feature_engineering.py
+    means = [
+        1.2, 6.0, 6.0, 550.0, 550.0, 1100.0, 11.0, 443.0, 105.0, 1.0,
+        45.0, 45.0, 1000.0, 500.0, 0.1, 0.05, 3.0, 45.0, 1.0, 8192.0,
+    ]
+    stds = [
+        0.6, 2.5, 2.5, 220.0, 220.0, 450.0, 4.5, 220.0, 35.0, 0.6,
+        20.0, 20.0, 400.0, 250.0, 0.3, 0.2, 1.5, 20.0, 0.5, 3000.0,
+    ]
     data = rng.normal(loc=means, scale=stds, size=(n_samples, len(means)))
     return np.clip(data, 0, None)
 

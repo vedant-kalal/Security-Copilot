@@ -28,6 +28,11 @@ backend/model_artifacts/*.threshold.json
 # the ~47MB STIX bundle and the SecureBERT embeddings/projection/metadata.
 backend/data/mitre/
 
+# Downloaded full-size training datasets (not repo assets — see to-do.md for source links)
+GeneratedLabelledFlows.zip
+GeneratedLabelledFlows.md5
+*.pcap_ISCX.csv
+
 # Runtime state (SQLite verdict cache — router fast path, spec section 2)
 backend/data/cache.db
 backend/data/history.db
