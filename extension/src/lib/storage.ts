@@ -2,15 +2,17 @@
  * Typed wrapper around `chrome.storage.local`, used instead of
  * `localStorage` because service workers and popup/options pages do not
  * share a single `window`. The backend has no auth (see
- * backend/README.md — POC scope), so the only durable setting is where
- * the backend lives.
+ * backend/README.md — POC scope), so the durable settings are just where
+ * the backend lives and whether automatic scanning is on.
  */
 export interface CopilotStorage {
   apiBaseUrl: string;
+  autoScanEnabled: boolean;
 }
 
 const DEFAULTS: CopilotStorage = {
   apiBaseUrl: "http://127.0.0.1:8010",
+  autoScanEnabled: true,
 };
 
 export async function getStorage(): Promise<CopilotStorage> {
@@ -23,10 +25,12 @@ export async function setStorage(partial: Partial<CopilotStorage>): Promise<void
 }
 
 /** Per-tab last verdict, kept in session storage (cleared on browser restart)
- * so re-opening the popup on the same tab doesn't re-run a check. */
+ * so re-opening the popup on the same tab doesn't re-run a check. `kind`
+ * "quick" is the automatic background.ts scan (ML model only, no runId);
+ * "link"/"email" are real on-demand checks through the full agent. */
 export interface TabVerdict {
   checkedUrl: string;
-  kind: "link" | "email";
+  kind: "link" | "email" | "quick";
   label: "dangerous" | "suspicious" | "safe" | "inconclusive";
   confidence: number;
   reason: string;

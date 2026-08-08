@@ -211,7 +211,7 @@ class TranADDetector:
                 import joblib
                 import torch
 
-                meta = json.loads(self.threshold_path.read_text())
+                meta = json.loads(self.threshold_path.read_text(encoding="utf-8"))
                 self._n_window = int(meta.get("n_window", self._n_window))
                 self._threshold = float(meta["threshold"])
                 self._scaler = joblib.load(self.scaler_path)

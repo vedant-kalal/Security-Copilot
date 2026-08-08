@@ -18,6 +18,10 @@ class CheckEmailRequest(BaseModel):
     text: str
 
 
+class QuickCheckRequest(BaseModel):
+    url: str
+
+
 class ReportFlowRequest(BaseModel):
     """Sent by the native host when Isolation Forest/TranAD flags a flow (spec sections 9/10)."""
 

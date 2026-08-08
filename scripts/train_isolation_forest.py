@@ -57,7 +57,7 @@ def load_baseline_from_csv(
     Isolation Forest's baseline (it should only ever be fit on normal
     traffic, never attack traffic)."""
     rows: list[list[float]] = []
-    with csv_path.open("r", newline="") as f:
+    with csv_path.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         label_col = next((c for c in reader.fieldnames or [] if c.lower() in ("label", "attack_cat")), None)
         for row in reader:
@@ -170,7 +170,8 @@ def main() -> None:
                 },
             },
             indent=2,
-        )
+        ),
+        encoding="utf-8",
     )
 
     print(f"Saved model     -> {model_path}")

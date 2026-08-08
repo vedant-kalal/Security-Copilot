@@ -1,0 +1,9 @@
+root = true
+
+# Shell scripts MUST stay LF — CRLF breaks bash ("set: pipefail: invalid option
+# name"). Most editors (VS Code, JetBrains, etc.) honor this and will save with
+# LF even on Windows. Pairs with .gitattributes (which enforces LF via git).
+[*.{sh,bash}]
+end_of_line = lf
+charset = utf-8
+insert_final_newline = true

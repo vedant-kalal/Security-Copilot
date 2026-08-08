@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "security-copilot",
   "version": "1.0.0",
-  "description": "On-demand phishing checks for the current page or its text, backed by the security-copilot LangGraph agent.",
+  "description": "Automatic phishing detection as you browse, backed by the security-copilot agent.",
   "icons": {
     "16": "icons/icon16.png",
     "48": "icons/icon48.png",
@@ -17,7 +17,18 @@
     }
   },
   "options_page": "options.html",
-  "permissions": ["storage", "activeTab", "scripting"],
+  "background": {
+    "service_worker": "assets/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["assets/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": ["storage", "activeTab", "scripting", "webNavigation"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
   "minimum_chrome_version": "96"
 }

@@ -39,47 +39,21 @@ class Settings(BaseSettings):
             return [origin.strip() for origin in value.split(",") if origin.strip()]
         return value
 
-    # --- LLM (agent) — Groq, per security-copilot-poc-scope memory --------
-    # A single key rate-limits fast: the agent makes several LLM calls per case
-    # (one per tool-call round trip). GROQ_API_KEYS holds all keys (comma-
-    # separated in the env) and agent/llm_client.py rotates across them round-
-    # robin, advancing on any 429. GROQ_API_KEY (singular) is still honored for
-    # backward compatibility — see the `groq_api_keys` property below, which is
-    # the single source of truth every caller should read.
-    GROQ_API_KEYS: str | List[str] = Field(
-        default_factory=list,
-        description="Comma-separated Groq keys for round-robin rotation. Free keys: https://console.groq.com/keys",
-    )
-    GROQ_API_KEY: str = Field(
+    # --- LLM (agent) — OpenRouter (OpenAI-compatible API) -----------------
+    # OpenRouter exposes many providers behind one OpenAI-compatible endpoint;
+    # agent/llm_client.py talks to it via langchain_openai.ChatOpenAI pointed
+    # at OPENROUTER_BASE_URL.
+    OPENROUTER_API_KEY: str = Field(
         default="",
-        description="Deprecated single-key fallback. Prefer GROQ_API_KEYS. Free key: https://console.groq.com/keys",
+        description="Required. Get one at https://openrouter.ai/keys",
     )
-
-    @field_validator("GROQ_API_KEYS", mode="before")
-    @classmethod
-    def _split_groq_keys(cls, value: object) -> object:
-        if isinstance(value, str):
-            return [key.strip() for key in value.split(",") if key.strip()]
-        return value
-
-    @property
-    def groq_api_keys(self) -> List[str]:
-        """The effective, de-duplicated key list every caller should use.
-
-        Prefers GROQ_API_KEYS; falls back to the singular GROQ_API_KEY so an
-        existing one-key `.env` keeps working unchanged. Order is preserved
-        (rotation starts at the first key) and duplicates are dropped.
-        """
-        keys = list(self.GROQ_API_KEYS) if isinstance(self.GROQ_API_KEYS, list) else []
-        if self.GROQ_API_KEY and self.GROQ_API_KEY not in keys:
-            keys.append(self.GROQ_API_KEY)
-        # De-dup while preserving order.
-        seen: set[str] = set()
-        return [k for k in keys if not (k in seen or seen.add(k))]
-
-    GROQ_MODEL: str = Field(
-        default="llama-3.3-70b-versatile",
-        description="Must support tool calling (the agent binds 3 tools). Verify against Groq's current model list.",
+    OPENROUTER_MODEL: str = Field(
+        default="openai/gpt-oss-120b",
+        description="Must support tool calling (the agent binds tools). Browse models at https://openrouter.ai/models",
+    )
+    OPENROUTER_BASE_URL: str = Field(
+        default="https://openrouter.ai/api/v1",
+        description="OpenAI-compatible base URL for OpenRouter.",
     )
     # LangGraph's recursion_limit counts every node hop, not just agent<->tools
     # round trips — router + (agent, tools) per tool call + a final agent

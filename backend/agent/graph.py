@@ -19,7 +19,7 @@ from agent.output_node import output_node
 from agent.router_node import route_after_router, router_node
 from agent.state import AgentState, CaseType, Verdict
 from config import get_settings
-from exceptions import AllKeysRateLimitedError
+from exceptions import LLMRateLimitedError
 from history import record_run
 from logger import get_logger
 from report import generate_report
@@ -39,15 +39,15 @@ INCONCLUSIVE_VERDICT = Verdict(
     mitigation=None,
 )
 
-# When every Groq key is throttled, an in-flight case can't be investigated at
-# all. Fail safe to a low-confidence "suspicious" verdict (never "safe") that
-# names the reason, rather than propagating a raw exception to the caller.
+# OpenRouter rate-limited the API key mid-investigation. Fail safe to a
+# low-confidence "suspicious" verdict (never "safe") that names the reason,
+# rather than propagating a raw exception to the caller.
 RATE_LIMITED_VERDICT = Verdict(
     label="suspicious",
     confidence=0.3,
     reason=(
-        "The investigation could not run because all of the LLM provider's API keys are "
-        "temporarily rate-limited. This is a service limitation, not a judgment about the "
+        "The investigation could not run because the LLM provider (OpenRouter) is temporarily "
+        "rate-limiting this API key. This is a service limitation, not a judgment about the "
         "target — treat it as unresolved and re-run in a few moments."
     ),
     mitigation=None,
@@ -99,8 +99,8 @@ async def run_case(case_type: CaseType, raw_input: str, mitre_technique: Optiona
     except GraphRecursionError:
         logger.warning("Case hit the recursion limit (%d) without concluding: %r", settings.AGENT_RECURSION_LIMIT, raw_input)
         return dict(INCONCLUSIVE_VERDICT)
-    except AllKeysRateLimitedError:
-        logger.warning("Case could not run — all Groq keys rate-limited: %r", raw_input)
+    except LLMRateLimitedError:
+        logger.warning("Case could not run — OpenRouter rate-limited: %r", raw_input)
         return dict(RATE_LIMITED_VERDICT)
 
 
@@ -161,8 +161,8 @@ async def run_case_traced(case_type: CaseType, raw_input: str, mitre_technique: 
     except GraphRecursionError:
         logger.warning("Case hit the recursion limit (%d) without concluding: %r", settings.AGENT_RECURSION_LIMIT, raw_input)
         verdict = dict(INCONCLUSIVE_VERDICT)
-    except AllKeysRateLimitedError:
-        logger.warning("Case could not run — all Groq keys rate-limited: %r", raw_input)
+    except LLMRateLimitedError:
+        logger.warning("Case could not run — OpenRouter rate-limited: %r", raw_input)
         verdict = dict(RATE_LIMITED_VERDICT)
 
     report_path = generate_report(case_type, raw_input, tool_call_records, verdict)

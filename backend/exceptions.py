@@ -62,13 +62,12 @@ class RateLimitedError(SentinelAIError):
     error_code = "rate_limited"
 
 
-class AllKeysRateLimitedError(RateLimitedError):
-    """Every configured Groq API key returned HTTP 429 for one request.
+class LLMRateLimitedError(RateLimitedError):
+    """OpenRouter returned HTTP 429 for one request.
 
-    Raised by agent/llm_client.py after it has tried each key in the rotation
-    once. Distinct from RateLimitedError so callers (output_node / the API's
-    error handler) can surface a specific "temporarily rate-limited" fallback
-    verdict instead of a bare stack trace.
+    Raised by agent/llm_client.py so callers (agent/graph.py / the API's error
+    handler) can surface a specific "temporarily rate-limited" fallback verdict
+    instead of a bare stack trace.
     """
 
-    error_code = "all_keys_rate_limited"
+    error_code = "llm_rate_limited"

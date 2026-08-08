@@ -70,6 +70,12 @@ def _format_domain_reputation(artifact: dict, _screenshot_path: Optional[str]) -
             f"- **VirusTotal:** {vt.get('malicious_count')} malicious, {vt.get('suspicious_count')} suspicious, "
             f"{vt.get('harmless_count')} harmless (reputation score {vt.get('reputation_score')})"
         )
+        for f in vt.get("flagged_by") or []:
+            lines.append(f"  - {f.get('vendor')}: **{f.get('category')}** ({f.get('result')})")
+        categories = vt.get("categories") or {}
+        if categories:
+            cat_str = ", ".join(f"{vendor}: {label}" for vendor, label in categories.items())
+            lines.append(f"- **Threat categorization:** {cat_str}")
     else:
         lines.append(f"- **VirusTotal:** unavailable ({vt.get('detail')})")
 
@@ -160,5 +166,8 @@ def generate_report(case_type: str, raw_input: str, tool_calls: list[dict[str, A
         lines.append("*Resolved by the router's fast path (blocklist/cache) — no tools were called.*")
         lines.append("")
 
-    report_path.write_text("\n".join(lines))
+    # UTF-8 explicitly: the LLM's text can contain non-ASCII (em/non-breaking
+    # dashes, smart quotes, emoji). Without this, Windows' default cp1252 codec
+    # raises UnicodeEncodeError and the whole /report-flow (or /check-*) 500s.
+    report_path.write_text("\n".join(lines), encoding="utf-8")
     return str(report_path)

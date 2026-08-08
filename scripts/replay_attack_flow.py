@@ -49,7 +49,7 @@ def main() -> None:
     detector = get_anomaly_detector("csv")
     benign = {"BENIGN", "benign", "0"}
 
-    with args.csv.open("r", newline="") as f:
+    with args.csv.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         label_col = _label_col(reader.fieldnames)
         rows = [r for r in reader if r.get(label_col, "").strip() not in benign]

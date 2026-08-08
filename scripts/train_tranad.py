@@ -42,7 +42,7 @@ def load_series_from_csv(csv_path: Path) -> np.ndarray:
     """Load a time-ordered series of window feature vectors from a CSV whose
     columns include the WINDOW_FEATURE_NAMES."""
     rows = []
-    with csv_path.open("r", newline="") as f:
+    with csv_path.open("r", newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             rows.append(extract_window_features(row))
     return np.array(rows, dtype=float)
@@ -98,7 +98,8 @@ def main() -> None:
                 "epochs": args.epochs,
             },
             indent=2,
-        )
+        ),
+        encoding="utf-8",
     )
 
     print(f"Saved model     -> {model_path}")

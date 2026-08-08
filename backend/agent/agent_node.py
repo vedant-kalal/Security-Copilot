@@ -1,6 +1,6 @@
 """
 Agent node (spec section 2) — binds the tools (spec section 4, plus
-`web_search` added afterward) to the Groq chat model and lets it decide
+`web_search` added afterward) to the LLM and lets it decide
 what to call next. "Sends the current message history plus the tools
 to [the model]. Appends whatever it returns to `messages`."
 

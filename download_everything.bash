@@ -35,27 +35,32 @@ else
   echo ".venv already exists, reusing it"
 fi
 
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
-pip install --upgrade pip
+# Use the venv's interpreter by absolute path (Windows/git-bash uses Scripts/,
+# Linux/macOS bin/) instead of relying on `activate` rewriting PATH — it silently
+# no-ops when another venv is already active in the parent shell.
+if   [ -x "$VENV_DIR/Scripts/python.exe" ]; then VENV_PY="$VENV_DIR/Scripts/python.exe"
+elif [ -x "$VENV_DIR/bin/python" ];         then VENV_PY="$VENV_DIR/bin/python"
+else echo "Could not find the venv Python under $VENV_DIR (Scripts/ or bin/)." >&2; exit 1
+fi
+"$VENV_PY" -m pip install --upgrade pip
 
 log "Installing torch (CPU wheel — override with TORCH_INDEX_URL for GPU)"
-pip install torch --index-url "$TORCH_INDEX_URL"
+"$VENV_PY" -m pip install torch --index-url "$TORCH_INDEX_URL"
 
 log "Installing backend/requirements.txt"
-pip install -r "$BACKEND_DIR/requirements.txt"
+"$VENV_PY" -m pip install -r "$BACKEND_DIR/requirements.txt"
 
 log "Installing Playwright's Chromium (used by the inspect_website tool)"
-playwright install chromium
+"$VENV_PY" -m playwright install chromium
 warn "If the sandbox fails to launch later with a missing-library error, also run:"
-warn "  source .venv/bin/activate && playwright install --with-deps chromium"
+warn "  \"$VENV_PY\" -m playwright install --with-deps chromium"
 warn "(needs sudo — installs OS-level libraries, not run automatically by this script)"
 
 # --- Backend: .env scaffolding -------------------------------------------
 cd "$BACKEND_DIR"
 if [ ! -f ".env" ]; then
   cp .env.example .env
-  log "Created backend/.env from .env.example — fill in GROQ_API_KEYS before running the agent"
+  log "Created backend/.env from .env.example — fill in OPENROUTER_API_KEY before running the agent"
 else
   echo "backend/.env already exists, leaving it alone"
 fi
@@ -65,7 +70,7 @@ fi
 # into the standard Hugging Face cache (~/.cache/huggingface) so the first
 # real check doesn't pay this cost mid-investigation.
 log "Pre-downloading ML models (this is the slow step — a few hundred MB)"
-python3 - <<'PY'
+"$VENV_PY" - <<'PY'
 from huggingface_hub import hf_hub_download
 from transformers import pipeline
 
@@ -77,8 +82,6 @@ pipeline("text-classification", model="ealvaradob/bert-finetuned-phishing")
 
 print("Models cached.")
 PY
-
-deactivate
 
 # --- Extension: npm deps + first build -----------------------------------
 log "Extension: installing npm dependencies"
@@ -92,7 +95,7 @@ log "Setup complete."
 cat <<EOF
 
 Next steps:
-  1. Fill in backend/.env (GROQ_API_KEYS is required, VT_API_KEY is optional
+  1. Fill in backend/.env (OPENROUTER_API_KEY is required, VT_API_KEY is optional
      but recommended — see backend/README.md for where to get both).
   2. Run ./run_all.bash (backend + network monitoring) or ./start_all.bash
      (backend only) to start it.
