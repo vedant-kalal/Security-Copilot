@@ -2,11 +2,13 @@
  * security-copilot background service worker.
  *
  * Owns the automatic per-navigation scan: on every top-level http(s)
- * navigation, calls the backend's fast /quick-check-url (local ML model
- * only, milliseconds, no LLM — see api/routes_quick_check.py) and, if it
- * comes back dangerous/suspicious, tells the content script in that tab to
- * show an in-page banner. A safe result shows nothing — silent by design,
- * per the user's explicit ask: automatic, but only surfaces on a hit.
+ * navigation, calls the backend's fast /quick-check-url (local ML model,
+ * corroborated with a cached VirusTotal lookup — see
+ * api/routes_quick_check.py) and tells the content script in that tab to
+ * show an in-page banner either way: dangerous/suspicious gets a banner
+ * that stays until the user dismisses it (no auto-hide timer — the user
+ * asked explicitly that unsafe verdicts not disappear on their own), safe
+ * gets a brief ~1.5s confirmation toast that clears itself.
  *
  * The banner's "Full report" button sends RUN_FULL_CHECK back here, which
  * runs the real investigation (the full agent — headless browser,
@@ -63,13 +65,35 @@ async function setBadge(tabId: number, label: string): Promise<void> {
   }
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// Retry delays for a message the content script isn't ready for yet. A
+// quick-check result can come back in single-digit milliseconds (cache/
+// blocklist hits, or even a fresh ML score), which is faster than a
+// content_scripts "document_idle" injection can possibly have registered
+// its onMessage listener — chrome.tabs.sendMessage then rejects with
+// "Could not establish connection. Receiving end does not exist." The
+// content script does become ready shortly after, so a few short retries
+// resolve this reliably instead of the banner silently never appearing.
+const SEND_RETRY_DELAYS_MS = [100, 250, 500, 1000];
+
 async function sendToTab(tabId: number, message: BackgroundToContentMessage): Promise<void> {
-  try {
-    await chrome.tabs.sendMessage(tabId, message);
-  } catch {
-    // The content script may not be injected yet (very early navigation) or
-    // the tab may not accept content scripts (a chrome:// page slipped
-    // through) — the badge is still set as a fallback signal either way.
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await chrome.tabs.sendMessage(tabId, message);
+      return;
+    } catch (error) {
+      if (attempt >= SEND_RETRY_DELAYS_MS.length) {
+        // Content script never became reachable (tab closed, a chrome://
+        // page slipped through, etc.) — the badge is still set as a
+        // fallback signal, so this isn't a silent total failure.
+        console.warn("security-copilot: sendToTab gave up after retries", tabId, message.type, error);
+        return;
+      }
+      await sleep(SEND_RETRY_DELAYS_MS[attempt]);
+    }
   }
 }
 
@@ -94,13 +118,43 @@ async function scanNavigation(tabId: number, url: string): Promise<void> {
         reason:
           result.source === "blocklist"
             ? "This URL matches security-copilot's static blocklist of known-bad domains."
-            : "security-copilot's local phishing-URL model flagged this address. Click \"Full report\" for a complete investigation.",
+            : result.source === "virustotal"
+              ? "VirusTotal already has multiple security vendors flagging this domain. Click \"Full report\" for a complete investigation."
+              : "security-copilot's local phishing-URL model flagged this address. Click \"Full report\" for a complete investigation.",
         mitigation: null,
         legitimateAlternatives: [],
         runId: null,
         checkedAt: Date.now(),
       });
-      await sendToTab(tabId, { type: "SHOW_BANNER", url, label: result.label, confidence: result.confidence });
+      await sendToTab(tabId, {
+        type: "SHOW_BANNER",
+        url,
+        label: result.label,
+        confidence: result.confidence,
+        source: result.source,
+      });
+    } else if (result.label === "safe") {
+      // No "Full report" button for these — it's a brief confirmation, not
+      // an alert — so a bare TabVerdict is enough for the popup to reflect
+      // it if opened right after.
+      await setTabVerdict(tabId, {
+        checkedUrl: url,
+        kind: "quick",
+        label: "safe",
+        confidence: result.confidence,
+        reason: "security-copilot's automatic quick scan found nothing suspicious about this page.",
+        mitigation: null,
+        legitimateAlternatives: [],
+        runId: null,
+        checkedAt: Date.now(),
+      });
+      await sendToTab(tabId, {
+        type: "SHOW_BANNER",
+        url,
+        label: "safe",
+        confidence: result.confidence,
+        source: result.source,
+      });
     }
   } catch (error) {
     // A quick-check failure (backend down, etc.) should never interrupt

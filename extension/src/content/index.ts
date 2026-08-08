@@ -4,21 +4,26 @@
  * Deliberately dependency-free (no imports, no React) so it can be bundled
  * as a small IIFE and injected on every page without pulling in the
  * extension's React bundle. Its only job is to render a floating banner
- * when background.ts's automatic quick-check flags the current page as
- * dangerous/suspicious — never for a safe result, per the user's request
- * that this be silent unless there's something to say.
+ * or toast whenever background.ts's automatic quick-check finishes.
  *
  * Renders inside a closed Shadow DOM so the page's own CSS can never break
  * (or be broken by) the banner, and talks back to background.ts by
  * message only — content scripts can't call chrome.tabs.* directly.
+ *
+ * "safe" gets a distinct, minimal toast that clears itself after ~1.5s —
+ * a brief confirmation, not an alert. "dangerous"/"suspicious" get the
+ * full banner with actions, and NEVER auto-dismiss — the user asked
+ * explicitly that those stay up until they click the close button.
  */
 (function securityCopilotContentScript() {
-  type Label = "dangerous" | "suspicious";
+  type Label = "dangerous" | "suspicious" | "safe";
 
   const HOST_ID = "security-copilot-banner-host";
+  const SAFE_TOAST_MS = 1600;
 
   let shadow: ShadowRoot | null = null;
   let cardEl: HTMLDivElement | null = null;
+  let safeDismissTimer: ReturnType<typeof setTimeout> | null = null;
 
   function ensureHost(): ShadowRoot {
     if (shadow) return shadow;
@@ -50,12 +55,15 @@
       }
       .card.dangerous { border-color: #FB7185; box-shadow: 0 8px 32px rgba(251,113,133,0.25); }
       .card.suspicious { border-color: #FBBF24; box-shadow: 0 8px 32px rgba(251,191,36,0.20); }
+      .card.safe { border-color: #34D399; box-shadow: 0 8px 32px rgba(52,211,153,0.18); width: auto; max-width: 260px; padding: 10px 14px; animation: sc-slide-in 0.2s ease-out, sc-fade-out 0.35s ease-in 1.25s forwards; }
       @keyframes sc-slide-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
+      @keyframes sc-fade-out { from { opacity: 1; } to { opacity: 0; } }
       .row { display: flex; align-items: flex-start; gap: 10px; }
       .icon { font-size: 20px; line-height: 1; flex-shrink: 0; }
       .title { font-weight: 700; font-size: 13px; letter-spacing: 0.02em; }
       .title.dangerous { color: #FB7185; }
       .title.suspicious { color: #FBBF24; }
+      .title.safe { color: #34D399; }
       .sub { color: #94A3B8; font-size: 11px; margin-top: 2px; }
       .msg { margin-top: 8px; color: #C7D2E3; }
       .actions { display: flex; gap: 8px; margin-top: 12px; }
@@ -87,29 +95,64 @@
   }
 
   function labelIcon(label: Label): string {
-    return label === "dangerous" ? "⛔" : "⚠️"; // ⛔ / ⚠️
+    if (label === "dangerous") return "⛔";
+    if (label === "suspicious") return "⚠️";
+    return "✅";
   }
 
-  function showBanner(url: string, label: Label, confidence: number): void {
+  function labelTitle(label: Label): string {
+    if (label === "dangerous") return "Dangerous site";
+    if (label === "suspicious") return "Suspicious site";
+    return "Looks safe";
+  }
+
+  function messageFor(label: "dangerous" | "suspicious", source: string): string {
+    if (source === "blocklist") return "This URL matches a known-bad domain. Avoid entering any credentials.";
+    if (source === "virustotal") {
+      return label === "dangerous"
+        ? "VirusTotal already has multiple security vendors flagging this domain as phishing/malicious."
+        : "VirusTotal has at least one security vendor flagging this domain. Worth a closer look.";
+    }
+    return label === "dangerous"
+      ? "This page's URL matches known phishing patterns. Avoid entering any credentials."
+      : "This page's URL looks unusual. Worth a closer look before you trust it.";
+  }
+
+  function showBanner(url: string, label: Label, confidence: number, source: string): void {
     const root = ensureHost();
     hideBanner();
 
     const card = document.createElement("div");
     card.className = `card ${label}`;
+
+    if (label === "safe") {
+      // Deliberately no close button, no actions — this is a brief
+      // confirmation that clears itself, not something to interact with.
+      card.innerHTML = `
+        <div class="row">
+          <span class="icon">${labelIcon(label)}</span>
+          <div>
+            <div class="title ${label}">${labelTitle(label)}</div>
+            <div class="sub">security-copilot &middot; quick scan</div>
+          </div>
+        </div>
+      `;
+      root.appendChild(card);
+      cardEl = card;
+      safeDismissTimer = setTimeout(hideBanner, SAFE_TOAST_MS);
+      return;
+    }
+
     card.innerHTML = `
       <button class="close" aria-label="Dismiss">&times;</button>
       <div class="row">
         <span class="icon">${labelIcon(label)}</span>
         <div>
-          <div class="title ${label}">${label === "dangerous" ? "Dangerous site" : "Suspicious site"}</div>
+          <div class="title ${label}">${labelTitle(label)}</div>
           <div class="sub">security-copilot &middot; ${Math.round(confidence * 100)}% confidence &middot; quick scan</div>
         </div>
       </div>
-      <div class="msg">${
-        label === "dangerous"
-          ? "This page's URL matches known phishing patterns. Avoid entering any credentials."
-          : "This page's URL looks unusual. Worth a closer look before you trust it."
-      }</div>
+      <div class="msg">${messageFor(label, source)}</div>
       <div class="actions">
         <button class="full-report primary">Full report</button>
         <button class="dismiss">Dismiss</button>
@@ -129,11 +172,17 @@
       }
     });
 
+    // No auto-dismiss timer here, intentionally: dangerous/suspicious
+    // banners stay until the user clicks the close button.
     root.appendChild(card);
     cardEl = card;
   }
 
   function hideBanner(): void {
+    if (safeDismissTimer !== null) {
+      clearTimeout(safeDismissTimer);
+      safeDismissTimer = null;
+    }
     if (cardEl) {
       cardEl.remove();
       cardEl = null;
@@ -150,7 +199,7 @@
   chrome.runtime.onMessage.addListener((message) => {
     switch (message?.type) {
       case "SHOW_BANNER":
-        showBanner(message.url, message.label, message.confidence);
+        showBanner(message.url, message.label, message.confidence, message.source);
         break;
       case "HIDE_BANNER":
         hideBanner();
