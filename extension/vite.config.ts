@@ -2,10 +2,10 @@ import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
-// Popup + options (React, multi-page). There is no background service
-// worker or content script — every check is triggered on-demand from
-// the popup, which talks to the backend directly (see src/lib/api.ts)
-// and reads the active tab via chrome.scripting (see src/popup/Popup.tsx).
+// Popup + options (React, multi-page) and the background service worker
+// (ES module — MV3 supports "type": "module" service workers). The content
+// script is built separately (see vite.content.config.ts) because content
+// scripts must ship as a classic IIFE for injection into arbitrary pages.
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -18,6 +18,7 @@ export default defineConfig({
       input: {
         popup: path.resolve(__dirname, "src/popup/index.html"),
         options: path.resolve(__dirname, "src/options/index.html"),
+        background: path.resolve(__dirname, "src/background/index.ts"),
       },
       output: {
         entryFileNames: "assets/[name].js",

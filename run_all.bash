@@ -13,7 +13,7 @@
 #
 # Prereqs: run ./download_everything.bash once first (creates .venv at the
 # repo root, installs deps + Chromium), then fill in backend/.env with your
-# OPENROUTER_API_KEYS.
+# OPENROUTER_API_KEY.
 #
 # Usage:
 #   ./run_all.bash                     # backend + native helper on :8010
@@ -37,7 +37,7 @@ die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 
 cd "$BACKEND_DIR"
 
-[ -f ".env" ] || die "backend/.env not found — run ./download_everything.bash first, then fill in OPENROUTER_API_KEYS."
+[ -f ".env" ] || die "backend/.env not found — run ./download_everything.bash first, then fill in OPENROUTER_API_KEY."
 
 # Resolve the venv's interpreter by absolute path (Windows/git-bash uses
 # Scripts/, Linux/macOS bin/) and invoke everything through it. We deliberately
@@ -49,8 +49,8 @@ elif [ -x "$VENV_DIR/bin/python" ];         then VENV_PY="$VENV_DIR/bin/python"
 else die "Could not find the venv Python under $VENV_DIR (looked in Scripts/ and bin/)."
 fi
 
-grep -qE '^OPENROUTER_API_KEYS?=.+' .env || \
-  warn "No OPENROUTER_API_KEYS (or OPENROUTER_API_KEY) set in backend/.env — the agent will fail on every case. Get a key at https://openrouter.ai/keys"
+grep -qE '^OPENROUTER_API_KEY=.+' .env || \
+  warn "No OPENROUTER_API_KEY set in backend/.env — the agent will fail on every case. Get a key at https://openrouter.ai/keys"
 
 if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
   exec 3>&-

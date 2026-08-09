@@ -21,7 +21,7 @@ die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 
 cd "$BACKEND_DIR"
 
-[ -f ".env" ] || die "backend/.env not found — run ./download_everything.bash first, then fill in OPENROUTER_API_KEYS."
+[ -f ".env" ] || die "backend/.env not found — run ./download_everything.bash first, then fill in OPENROUTER_API_KEY."
 
 # Resolve the venv's interpreter by absolute path and invoke uvicorn through it
 # (Windows/git-bash uses Scripts/, Linux/macOS bin/). We don't rely on `activate`
@@ -37,8 +37,8 @@ if (exec 3<>"/dev/tcp/127.0.0.1/$PORT") 2>/dev/null; then
   die "Something is already listening on 127.0.0.1:$PORT (likely an unrelated project — this repo defaults to 8010 to avoid the usual 8000/8001 collisions). Stop it first, or run with PORT=<free-port> ./start_all.bash."
 fi
 
-if ! grep -qE '^OPENROUTER_API_KEYS?=.+' .env; then
-  printf '\033[1;33m!! No OPENROUTER_API_KEYS (or OPENROUTER_API_KEY) set in backend/.env — the agent will fail on every case. Get a key at https://openrouter.ai/keys\033[0m\n'
+if ! grep -qE '^OPENROUTER_API_KEY=.+' .env; then
+  printf '\033[1;33m!! No OPENROUTER_API_KEY set in backend/.env — the agent will fail on every case. Get a key at https://openrouter.ai/keys\033[0m\n'
 fi
 
 log "Starting security-copilot backend on http://127.0.0.1:$PORT"

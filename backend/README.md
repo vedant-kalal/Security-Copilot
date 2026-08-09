@@ -69,7 +69,7 @@ cd ..   # repo root — the venv lives there, not inside backend/
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r backend/requirements.txt
 playwright install chromium          # needed by tools/inspect_website.py
-cd backend && cp .env.example .env   # then fill in OPENROUTER_API_KEYS at minimum
+cd backend && cp .env.example .env   # then fill in OPENROUTER_API_KEY at minimum
 ```
 
 Every time after that — just activate the venv and cd back in:

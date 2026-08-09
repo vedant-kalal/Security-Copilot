@@ -19,6 +19,17 @@ export interface CheckLinksResponse {
   results: Record<string, Verdict>;
 }
 
+/** One Server-Sent Event from POST /check-links-stream
+ * (api/routes_check_links_stream.py) — a live play-by-play of the actual
+ * agent steps (agent/graph.py's stream_case_traced) instead of one
+ * blocking response, so the "Full report" flow can show what's actually
+ * happening instead of a static spinner. A stream is one or more
+ * "progress" events followed by exactly one "done" event carrying the
+ * same shape /check-links' response would have had for this URL. */
+export type CheckLinksStreamEvent =
+  | { type: "progress"; label: string }
+  | { type: "done"; verdict: Omit<Verdict, "run_id">; run_id: string; report_path: string };
+
 /** POST /check-email returns a bare Verdict (api/routes_check_email.py). */
 export type CheckEmailResponse = Verdict;
 
@@ -34,3 +45,50 @@ export interface RunSummary {
     reason?: string;
   };
 }
+
+/** POST /quick-check-url response (api/routes_quick_check.py) — the fast,
+ * local pre-check background.ts runs on every navigation — the ONNX URL
+ * model, corroborated with a (cached) VirusTotal lookup when the model
+ * alone doesn't already say "dangerous" (see routes_quick_check.py's
+ * docstring for why: the model alone misses real phishing sites VT already
+ * has signal on). No run_id: it never touches history.py, only the full
+ * agent does that. */
+export interface QuickCheckResponse {
+  label: "dangerous" | "suspicious" | "safe" | "unknown";
+  confidence: number;
+  source: "cache" | "blocklist" | "ml_model" | "virustotal" | "page_signal" | "error";
+  detail?: string;
+}
+
+/** Messages passed between background.ts (which owns navigation events and
+ * the backend calls) and content.ts (which owns the in-page banner). */
+export type BackgroundToContentMessage =
+  | {
+      type: "SHOW_BANNER";
+      url: string;
+      label: "dangerous" | "suspicious" | "safe";
+      confidence: number;
+      source: QuickCheckResponse["source"];
+    }
+  | { type: "HIDE_BANNER" }
+  | { type: "FULL_CHECK_STARTED" }
+  // One per step the agent actually takes (see graph.py's
+  // stream_case_traced) — "Opening the page...", "Checking VirusTotal...",
+  // etc. Arrives zero or more times between FULL_CHECK_STARTED and
+  // FULL_CHECK_DONE/FAILED.
+  | { type: "FULL_CHECK_PROGRESS"; label: string }
+  | { type: "FULL_CHECK_DONE"; runId: string; label: string; confidence: number }
+  | { type: "FULL_CHECK_FAILED"; message: string };
+
+export type ContentToBackgroundMessage =
+  // tabId is only set when this comes from the popup — content scripts
+  // don't know their own tab id, but the background can read it off
+  // sender.tab.id for those; the popup has no sender.tab at all (it's an
+  // extension page, not injected into the tab), so it has to say which
+  // tab explicitly.
+  | { type: "RUN_FULL_CHECK"; url: string; tabId?: number }
+  // Sent only when the content script finds a password field inside a
+  // form whose action posts to a different site than the page itself —
+  // see content/index.ts's computePageSignals(). Not sent otherwise, so
+  // its mere arrival already means something's worth a second look.
+  | { type: "PAGE_SIGNALS"; url: string; actionDomain: string };

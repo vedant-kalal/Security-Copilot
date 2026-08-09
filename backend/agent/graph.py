@@ -19,7 +19,7 @@ from agent.output_node import output_node
 from agent.router_node import route_after_router, router_node
 from agent.state import AgentState, CaseType, Verdict
 from config import get_settings
-from exceptions import AllKeysRateLimitedError
+from exceptions import LLMRateLimitedError
 from history import record_run
 from logger import get_logger
 from report import generate_report
@@ -39,15 +39,15 @@ INCONCLUSIVE_VERDICT = Verdict(
     mitigation=None,
 )
 
-# When every OpenRouter key is throttled, an in-flight case can't be investigated
-# at all. Fail safe to a low-confidence "suspicious" verdict (never "safe") that
-# names the reason, rather than propagating a raw exception to the caller.
+# OpenRouter rate-limited the API key mid-investigation. Fail safe to a
+# low-confidence "suspicious" verdict (never "safe") that names the reason,
+# rather than propagating a raw exception to the caller.
 RATE_LIMITED_VERDICT = Verdict(
     label="suspicious",
     confidence=0.3,
     reason=(
-        "The investigation could not run because all of the LLM provider's API keys are "
-        "temporarily rate-limited. This is a service limitation, not a judgment about the "
+        "The investigation could not run because the LLM provider (OpenRouter) is temporarily "
+        "rate-limiting this API key. This is a service limitation, not a judgment about the "
         "target — treat it as unresolved and re-run in a few moments."
     ),
     mitigation=None,
@@ -99,18 +99,49 @@ async def run_case(case_type: CaseType, raw_input: str, mitre_technique: Optiona
     except GraphRecursionError:
         logger.warning("Case hit the recursion limit (%d) without concluding: %r", settings.AGENT_RECURSION_LIMIT, raw_input)
         return dict(INCONCLUSIVE_VERDICT)
-    except AllKeysRateLimitedError:
-        logger.warning("Case could not run — all LLM API keys rate-limited: %r", raw_input)
+    except LLMRateLimitedError:
+        logger.warning("Case could not run — OpenRouter rate-limited: %r", raw_input)
         return dict(RATE_LIMITED_VERDICT)
 
 
-async def run_case_traced(case_type: CaseType, raw_input: str, mitre_technique: Optional[dict] = None) -> dict:
-    """Same as `run_case`, but captures every tool call along the way (not
-    just the final verdict) and records the whole thing as one entry in
-    history.py + report.py — this is what the API and cli.py both use so
-    every run, from either path, shows up in the UI's history list.
+# Friendly, human-readable labels for what the agent is actually doing —
+# shown live in the extension's banner/popup while a full check runs
+# (spec: users watching a 10-40s investigation should see *what* it's
+# doing, not just a static "Investigating..." spinner). Keyed by tool
+# name; inspect_website gets a different label on repeat calls since a
+# second call means the agent chose to follow a link it found suspicious
+# on the first page (spec section 4.1 / inspect_website.py's docstring).
+_TOOL_LABELS = {
+    "domain_reputation": "Checking VirusTotal & domain registration history...",
+    "content_classifier": "Analyzing the page for phishing patterns...",
+    "web_search": "Searching the web for the real, legitimate site...",
+}
 
-    Returns {"verdict": ..., "run_id": ..., "report_path": ...}.
+
+def _friendly_step(tool_name: str, call_number: int) -> str:
+    if tool_name == "inspect_website":
+        return (
+            "Opening the page in a sandboxed browser & taking a screenshot..."
+            if call_number == 1
+            else "Exploring another page found on the site..."
+        )
+    return _TOOL_LABELS.get(tool_name, f"Running {tool_name}...")
+
+
+async def stream_case_traced(case_type: CaseType, raw_input: str, mitre_technique: Optional[dict] = None):
+    """Same investigation as `run_case_traced` below, but as an async
+    generator that yields a `{"type": "progress", "label": ...}` event
+    after every step instead of only returning once at the very end —
+    what api/routes_check_links_stream.py's SSE endpoint forwards to the
+    extension so its "Full report" flow can show live progress instead of
+    a static spinner for however long the real investigation takes.
+
+    This *is* the implementation now — `run_case_traced` just consumes it
+    and returns the final `{"type": "done", ...}` event's payload, so the
+    two can never drift out of sync with each other.
+
+    Ends with exactly one `{"type": "done", "verdict": ..., "run_id": ...,
+    "report_path": ...}` event.
     """
     graph = build_graph()
     settings = get_settings()
@@ -126,6 +157,9 @@ async def run_case_traced(case_type: CaseType, raw_input: str, mitre_technique: 
     tool_call_records: list[dict] = []
     pending_calls: list[dict] = []
     verdict: Optional[dict] = None
+    call_counts: dict[str, int] = {}
+
+    yield {"type": "progress", "label": "Starting investigation..."}
 
     try:
         async for step in graph.astream(
@@ -138,6 +172,12 @@ async def run_case_traced(case_type: CaseType, raw_input: str, mitre_technique: 
                     last = update["messages"][-1]
                     tool_calls = getattr(last, "tool_calls", None)
                     pending_calls = tool_calls if tool_calls else []
+                    # Announced as soon as the agent decides to call them —
+                    # before the (possibly slow) call actually finishes —
+                    # so the label reflects what's happening *right now*.
+                    for call in pending_calls:
+                        call_counts[call["name"]] = call_counts.get(call["name"], 0) + 1
+                        yield {"type": "progress", "label": _friendly_step(call["name"], call_counts[call["name"]])}
 
                 elif node_name == "tools":
                     for i, msg in enumerate(update["messages"]):
@@ -161,11 +201,28 @@ async def run_case_traced(case_type: CaseType, raw_input: str, mitre_technique: 
     except GraphRecursionError:
         logger.warning("Case hit the recursion limit (%d) without concluding: %r", settings.AGENT_RECURSION_LIMIT, raw_input)
         verdict = dict(INCONCLUSIVE_VERDICT)
-    except AllKeysRateLimitedError:
-        logger.warning("Case could not run — all LLM API keys rate-limited: %r", raw_input)
+    except LLMRateLimitedError:
+        logger.warning("Case could not run — OpenRouter rate-limited: %r", raw_input)
         verdict = dict(RATE_LIMITED_VERDICT)
 
+    yield {"type": "progress", "label": "Finalizing the verdict & saving the report..."}
     report_path = generate_report(case_type, raw_input, tool_call_records, verdict)
     run_id = record_run(case_type, raw_input, tool_call_records, verdict, report_path)
 
-    return {"verdict": verdict, "run_id": run_id, "report_path": report_path}
+    yield {"type": "done", "verdict": verdict, "run_id": run_id, "report_path": report_path}
+
+
+async def run_case_traced(case_type: CaseType, raw_input: str, mitre_technique: Optional[dict] = None) -> dict:
+    """Same as `run_case`, but captures every tool call along the way (not
+    just the final verdict) and records the whole thing as one entry in
+    history.py + report.py — this is what the API and cli.py both use so
+    every run, from either path, shows up in the UI's history list.
+
+    Returns {"verdict": ..., "run_id": ..., "report_path": ...}. See
+    `stream_case_traced` above for the actual step-by-step implementation
+    — this just drains it and keeps the final result.
+    """
+    async for event in stream_case_traced(case_type, raw_input, mitre_technique):
+        if event["type"] == "done":
+            return {"verdict": event["verdict"], "run_id": event["run_id"], "report_path": event["report_path"]}
+    raise RuntimeError("stream_case_traced ended without a 'done' event")  # unreachable

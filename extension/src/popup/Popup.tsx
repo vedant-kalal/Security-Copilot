@@ -18,8 +18,8 @@ import { useEffect, useState } from "react";
 import { AnomalyView } from "@/popup/AnomalyView";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { api, ApiError } from "@/lib/api";
-import { getStorage, getTabVerdict, setTabVerdict, type TabVerdict } from "@/lib/storage";
-import type { CheckEmailResponse, CheckLinksResponse } from "@/types";
+import { getPendingFullCheck, getStorage, getTabVerdict, setTabVerdict, type PendingFullCheck, type TabVerdict } from "@/lib/storage";
+import type { CheckEmailResponse } from "@/types";
 
 const MAX_PAGE_TEXT_CHARS = 20000;
 
@@ -35,7 +35,12 @@ type View =
   | { status: "loading" }
   | { status: "unsupported" }
   | { status: "idle"; tab: ActiveTab }
-  | { status: "checking"; tab: ActiveTab; kind: "link" | "email" }
+  // `step` is only ever populated for kind "link" — a live label from
+  // background.ts's SSE consumption of /check-links-stream (e.g.
+  // "Checking VirusTotal..."), absent until the first progress event
+  // arrives. "email" checks aren't step-by-step (a single /check-email
+  // call, no streaming) so they just show the generic scanning message.
+  | { status: "checking"; tab: ActiveTab; kind: "link" | "email"; step?: string }
   | { status: "result"; tab: ActiveTab; verdict: TabVerdict }
   | { status: "error"; tab: ActiveTab; message: string };
 
@@ -63,10 +68,60 @@ function labelMeta(label: TabVerdict["label"]) {
 export function Popup() {
   const [mode, setMode] = useState<Mode>("phishing");
   const [view, setView] = useState<View>({ status: "loading" });
+  const tab = "tab" in view ? view.tab : null;
 
   useEffect(() => {
     void bootstrap();
   }, []);
+
+  // A "Full report" run started from the banner (or from this popup on a
+  // previous open) lives in the background service worker, not in this
+  // popup — popups close the instant they lose focus, so this component
+  // can't just await a fetch itself and expect to still be around when it
+  // resolves. Instead it watches chrome.storage.session for the same
+  // writes background.ts's runFullCheck already makes, and reflects
+  // whatever it finds — whether or not this popup instance is the one
+  // that started the check.
+  useEffect(() => {
+    if (!tab) return;
+    const tabId = tab.id;
+    const currentUrl = tab.url;
+
+    function onChanged(changes: Record<string, chrome.storage.StorageChange>, areaName: string) {
+      if (areaName !== "session") return;
+      const verdictChange = changes[`tab_verdict_${tabId}`];
+      if (verdictChange) {
+        const newVerdict = verdictChange.newValue as TabVerdict | undefined;
+        if (newVerdict && newVerdict.checkedUrl === currentUrl) {
+          setView({ status: "result", tab: { id: tabId, url: currentUrl, hostname: hostnameOf(currentUrl) }, verdict: newVerdict });
+        }
+        return;
+      }
+      const pendingChange = changes[`pending_full_check_${tabId}`];
+      if (!pendingChange) return;
+      if (pendingChange.newValue === undefined) {
+        // Pending check cleared with no verdict update alongside it (that
+        // case is handled above) means the check failed — but only worth
+        // reporting if this popup was actually shown as waiting on it.
+        setView((prev) =>
+          prev.status === "checking" && prev.kind === "link"
+            ? { status: "error", tab: prev.tab, message: "Full check failed. Try again." }
+            : prev,
+        );
+        return;
+      }
+      // A live step label landed (background.ts's runFullCheck updates
+      // this on every SSE progress event) — reflect it if this popup is
+      // currently showing the "checking" state for the same check.
+      const newPending = pendingChange.newValue as PendingFullCheck;
+      if (newPending.url === currentUrl && newPending.step) {
+        setView((prev) => (prev.status === "checking" && prev.kind === "link" ? { ...prev, step: newPending.step } : prev));
+      }
+    }
+
+    chrome.storage.onChanged.addListener(onChanged);
+    return () => chrome.storage.onChanged.removeListener(onChanged);
+  }, [tab?.id, tab?.url]);
 
   async function bootstrap() {
     const [chromeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -76,45 +131,66 @@ export function Popup() {
     }
     const tab: ActiveTab = { id: chromeTab.id, url: chromeTab.url, hostname: hostnameOf(chromeTab.url) };
 
+    // Checked before the cached verdict below, deliberately: the automatic
+    // quick-scan sets a (kind: "quick") verdict on essentially every
+    // navigation, almost always well before the user could open this
+    // popup — so if that check ran first, a full check already running in
+    // the background (started from the banner, or from a previous popup
+    // open that got closed before it finished) would never be reflected,
+    // and the user would see a stale quick-scan result with no indication
+    // anything is in progress.
+    const pending = await getPendingFullCheck(tab.id);
+    if (pending && pending.url === tab.url) {
+      setView({ status: "checking", tab, kind: "link", step: pending.step });
+      return;
+    }
+
     const cached = await getTabVerdict(tab.id);
     if (cached && cached.checkedUrl === tab.url) {
       setView({ status: "result", tab, verdict: cached });
-    } else {
-      setView({ status: "idle", tab });
+      return;
     }
+
+    setView({ status: "idle", tab });
   }
 
   async function applyVerdict(tab: ActiveTab, verdict: TabVerdict) {
     await setTabVerdict(tab.id, verdict);
-    await chrome.action.setBadgeText({
-      tabId: tab.id,
-      text: verdict.label === "dangerous" || verdict.label === "suspicious" ? "!" : "",
-    });
-    await chrome.action.setBadgeBackgroundColor({
-      tabId: tab.id,
-      color: verdict.label === "dangerous" ? "#EF4444" : "#F5A623",
-    });
+    // The tab can close mid-investigation (a 10-30s full check) — badging a
+    // tab that no longer exists throws, but that's not a reason to treat an
+    // otherwise-successful verdict as a failure, so it's isolated here.
+    try {
+      await chrome.action.setBadgeText({
+        tabId: tab.id,
+        text: verdict.label === "dangerous" || verdict.label === "suspicious" ? "!" : "",
+      });
+      await chrome.action.setBadgeBackgroundColor({
+        tabId: tab.id,
+        color: verdict.label === "dangerous" ? "#EF4444" : "#F5A623",
+      });
+    } catch {
+      // Tab closed before the badge could be set — the verdict itself is
+      // still valid and gets shown/stored below.
+    }
     setView({ status: "result", tab, verdict });
   }
 
   async function handleCheckUrl(tab: ActiveTab) {
     setView({ status: "checking", tab, kind: "link" });
+    // The actual /check-links call now runs in the background service
+    // worker (background.ts's runFullCheck), not here — a full
+    // investigation can take 10-40s, and this popup closes the instant it
+    // loses focus, which would silently abandon a check run locally the
+    // same way the banner's "Full report" button used to get stuck. The
+    // result comes back through the storage.onChanged listener above,
+    // whether or not this exact popup instance is still open when it
+    // lands. This also means a check already running (started from the
+    // banner) is naturally deduped — see runFullCheck's pending-check
+    // guard — instead of firing a second, redundant one.
     try {
-      const { results } = await api.post<CheckLinksResponse>("/check-links", { urls: [tab.url] });
-      const v = results[tab.url];
-      await applyVerdict(tab, {
-        checkedUrl: tab.url,
-        kind: "link",
-        label: v.label,
-        confidence: v.confidence,
-        reason: v.reason,
-        mitigation: v.mitigation,
-        legitimateAlternatives: v.legitimate_alternatives,
-        runId: v.run_id,
-        checkedAt: Date.now(),
-      });
-    } catch (error) {
-      setView({ status: "error", tab, message: error instanceof ApiError ? error.message : "Check failed." });
+      await chrome.runtime.sendMessage({ type: "RUN_FULL_CHECK", url: tab.url, tabId: tab.id });
+    } catch {
+      setView({ status: "error", tab, message: "Could not start the check. Try again." });
     }
   }
 
@@ -152,8 +228,6 @@ export function Popup() {
     const { apiBaseUrl } = await getStorage();
     chrome.tabs.create({ url: `${apiBaseUrl}/?run=${runId}` });
   }
-
-  const tab = "tab" in view ? view.tab : null;
 
   return (
     <div className="flex flex-col">
@@ -248,7 +322,10 @@ export function Popup() {
 
                 {view.status === "checking" && (
                   <div className="mt-4 rounded-lg scan-bg animate-scan px-4 py-2.5 text-center">
-                    <p className="font-mono text-xs text-fog-dim">Investigating — agent is scanning the target...</p>
+                    <p className="flex items-center justify-center gap-2 font-mono text-xs text-fog-dim">
+                      {view.kind === "link" && <Loader2 className="h-3 w-3 shrink-0 animate-spin" />}
+                      {view.kind === "link" ? (view.step ?? "Starting investigation...") : "Analyzing page text..."}
+                    </p>
                   </div>
                 )}
 
@@ -270,8 +347,12 @@ export function Popup() {
                           <div>
                             <p className={`text-sm font-bold capitalize ${color}`}>{view.verdict.label}</p>
                             <p className="mt-0.5 font-mono text-xs text-fog-faint">
-                              {view.verdict.kind === "link" ? "URL check" : "Page text check"} &middot;{" "}
-                              {Math.round(view.verdict.confidence * 100)}% confidence
+                              {view.verdict.kind === "link"
+                                ? "URL check"
+                                : view.verdict.kind === "email"
+                                  ? "Page text check"
+                                  : "Automatic quick scan"}{" "}
+                              &middot; {Math.round(view.verdict.confidence * 100)}% confidence
                             </p>
                           </div>
                         </div>

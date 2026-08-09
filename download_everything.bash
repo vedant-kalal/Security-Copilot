@@ -60,7 +60,7 @@ warn "(needs sudo — installs OS-level libraries, not run automatically by this
 cd "$BACKEND_DIR"
 if [ ! -f ".env" ]; then
   cp .env.example .env
-  log "Created backend/.env from .env.example — fill in OPENROUTER_API_KEYS before running the agent"
+  log "Created backend/.env from .env.example — fill in OPENROUTER_API_KEY before running the agent"
 else
   echo "backend/.env already exists, leaving it alone"
 fi
@@ -95,7 +95,7 @@ log "Setup complete."
 cat <<EOF
 
 Next steps:
-  1. Fill in backend/.env (OPENROUTER_API_KEYS is required, VT_API_KEY is optional
+  1. Fill in backend/.env (OPENROUTER_API_KEY is required, VT_API_KEY is optional
      but recommended — see backend/README.md for where to get both).
   2. Run ./run_all.bash (backend + network monitoring) or ./start_all.bash
      (backend only) to start it.
