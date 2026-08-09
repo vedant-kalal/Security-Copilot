@@ -91,4 +91,5 @@ export type ContentToBackgroundMessage =
   // form whose action posts to a different site than the page itself —
   // see content/index.ts's computePageSignals(). Not sent otherwise, so
   // its mere arrival already means something's worth a second look.
-  | { type: "PAGE_SIGNALS"; url: string; actionDomain: string };
+  | { type: "PAGE_SIGNALS"; url: string; actionDomain: string }
+  | { type: "REPORT_PHISHING"; url: string; reason?: string };

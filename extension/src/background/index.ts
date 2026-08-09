@@ -340,6 +340,13 @@ async function runFullCheck(tabId: number, url: string): Promise<void> {
   }
 }
 
+async function handleReportPhishing(phishingUrl: string, reason?: string): Promise<void> {
+  const reportUrl = new URL("https://safebrowsing.google.com/safebrowsing/report_phish/");
+  reportUrl.searchParams.set("url", phishingUrl);
+  if (reason) reportUrl.searchParams.set("reason", reason);
+  await chrome.tabs.create({ url: reportUrl.toString() });
+}
+
 chrome.runtime.onMessage.addListener((message: ContentToBackgroundMessage, sender) => {
   if (message.type === "RUN_FULL_CHECK") {
     // From the banner (content script), the tab is sender.tab; from the
@@ -349,6 +356,8 @@ chrome.runtime.onMessage.addListener((message: ContentToBackgroundMessage, sende
     if (tabId !== undefined) void runFullCheck(tabId, message.url);
   } else if (message.type === "PAGE_SIGNALS" && sender.tab?.id !== undefined) {
     void handlePageSignals(sender.tab.id, message.url, message.actionDomain);
+  } else if (message.type === "REPORT_PHISHING") {
+    void handleReportPhishing(message.url, message.reason);
   }
   return false;
 });

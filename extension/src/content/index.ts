@@ -186,6 +186,12 @@
         <button class="full-report primary">Full report</button>
         <button class="dismiss">Dismiss</button>
       </div>
+      <div class="actions" style="margin-top: 8px;">
+        <button class="report-page" style="background: transparent; border-color: #64748B; color: #94A3B8; text-align: left;" title="Report this phishing page to Google Safe Browsing">
+          <span style="display: block; font-size: 11px; margin-bottom: 2px;">Help protect others:</span>
+          Report to Google Safe Browsing <span style="float: right;">↗</span>
+        </button>
+      </div>
     `;
 
     card.querySelector(".close")?.addEventListener("click", hideBanner);
@@ -198,6 +204,16 @@
         chrome.runtime.sendMessage({ type: "RUN_FULL_CHECK", url });
       } catch {
         // Extension context invalidated (e.g. mid-update) — nothing to recover.
+      }
+    });
+    card.querySelector(".report-page")?.addEventListener("click", (e) => {
+      const btn = e.currentTarget as HTMLButtonElement;
+      btn.disabled = true;
+      btn.innerHTML = "Opening report form...";
+      try {
+        chrome.runtime.sendMessage({ type: "REPORT_PHISHING", url, reason: "Flagged by security-copilot: " + messageFor(label, source) });
+      } catch {
+        // Extension context invalidated
       }
     });
 
@@ -314,5 +330,159 @@
     }
   }
 
+  function checkAndAutoFillSafeBrowsing(): void {
+    if (!location.hostname.includes("safebrowsing.google.com")) return;
+    const params = new URLSearchParams(location.search);
+    const urlToReport = params.get("url");
+    if (!urlToReport) return;
+    const reason = params.get("reason") || "Flagged as a deceptive site attempting to trick users into sharing sensitive information. Please investigate for potential phishing activity.";
+
+    const triggerEvents = (element: HTMLElement | null) => {
+      if (!element) return;
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      element.dispatchEvent(new Event("blur", { bubbles: true }));
+    };
+
+    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+
+    const showModal = () => {
+      const modalOverlay = document.createElement("div");
+      modalOverlay.style.cssText = `
+        position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+        background: rgba(0,0,0,0.5); z-index: 999998; backdrop-filter: blur(2px);
+        display: flex; align-items: center; justify-content: center;
+      `;
+      const modalContent = document.createElement("div");
+      modalContent.style.cssText = `
+        background: #1e293b; color: #f8fafc; padding: 24px 32px; border-radius: 12px;
+        font-family: -apple-system, sans-serif; max-width: 420px; text-align: center;
+        box-shadow: 0 10px 40px rgba(0,0,0,0.3); z-index: 999999;
+        border: 1px solid #334155;
+      `;
+      modalContent.innerHTML = `
+        <div style="font-size: 32px; margin-bottom: 12px;">✅</div>
+        <h2 style="margin: 0 0 12px; font-size: 18px; font-weight: 600;">Form auto-filled!</h2>
+        <p style="margin: 0 0 24px; color: #94a3b8; font-size: 14px; line-height: 1.5;">
+          We've filled out the report details for you. However, Google's <strong>security reCAPTCHA</strong> prevents us from submitting it automatically.<br><br>
+          Please complete the CAPTCHA check below and manually click <strong>Submit Report</strong>.
+        </p>
+        <button id="sc-modal-dismiss" style="
+          background: #6366f1; color: white; border: none; padding: 10px 24px;
+          border-radius: 8px; font-weight: 600; cursor: pointer; font-size: 14px;
+          transition: opacity 0.2s;
+        ">Got it, let me submit</button>
+      `;
+      modalOverlay.appendChild(modalContent);
+      document.body.appendChild(modalOverlay);
+
+      modalContent.querySelector("#sc-modal-dismiss")?.addEventListener("click", () => {
+        modalOverlay.remove();
+      });
+    };
+
+    let highlightBox: HTMLDivElement | null = null;
+    const highlightElement = (element: HTMLElement | null) => {
+      if (!element) {
+        if (highlightBox) { highlightBox.remove(); highlightBox = null; }
+        return;
+      }
+      if (!highlightBox) {
+        highlightBox = document.createElement("div");
+        highlightBox.style.cssText = `
+          position: fixed;
+          border: 3px solid #6366f1;
+          border-radius: 6px;
+          box-shadow: 0 0 16px rgba(99, 102, 241, 0.6);
+          pointer-events: none;
+          z-index: 999997;
+          transition: all 0.3s ease;
+          background: rgba(99, 102, 241, 0.1);
+        `;
+        document.body.appendChild(highlightBox);
+      }
+      const targetForRect = element.closest('mat-form-field') || element;
+      const rect = targetForRect.getBoundingClientRect();
+      const padding = 8;
+      highlightBox.style.top = (rect.top - padding) + "px";
+      highlightBox.style.left = (rect.left - padding) + "px";
+      highlightBox.style.width = (rect.width + padding * 2) + "px";
+      highlightBox.style.height = (rect.height + padding * 2) + "px";
+    };
+
+    const runAutoFill = async () => {
+      // Wait for URL input to be available
+      let urlInput = null;
+      for (let i = 0; i < 20; i++) {
+        urlInput = document.querySelector<HTMLInputElement>('input[formcontrolname="url"]') || document.querySelector<HTMLInputElement>("#mat-input-0");
+        if (urlInput) break;
+        await sleep(250);
+      }
+      if (!urlInput) return;
+
+      await sleep(1000); // Initial human-like pause
+      highlightElement(urlInput);
+      await sleep(500);
+
+      urlInput.value = "";
+      for (let i = 0; i < urlToReport.length; i++) {
+        urlInput.value += urlToReport[i];
+        triggerEvents(urlInput);
+        await sleep(30 + Math.random() * 40);
+      }
+
+      await sleep(800);
+      const threatTypeSelect = document.querySelector<HTMLElement>('mat-select[formcontrolname="threatType"]') || document.querySelector<HTMLElement>("#mat-select-1");
+      if (threatTypeSelect) {
+        highlightElement(threatTypeSelect);
+        await sleep(400);
+        threatTypeSelect.click();
+        await sleep(1000); // Wait for dropdown animation
+        
+        const options = document.querySelectorAll<HTMLElement>("mat-option");
+        const seOption = Array.from(options).find((opt) => opt.textContent?.includes("Social Engineering"));
+        if (seOption) seOption.click();
+
+        await sleep(800);
+        const threatCategorySelect = document.querySelector<HTMLElement>('mat-select[formcontrolname="threatCategory"]') || document.querySelector<HTMLElement>("#mat-select-2");
+        if (threatCategorySelect) {
+          highlightElement(threatCategorySelect);
+          await sleep(400);
+          threatCategorySelect.click();
+          await sleep(1000);
+          
+          const visibleOptions = Array.from(document.querySelectorAll<HTMLElement>("mat-option")).filter(opt => opt.offsetParent !== null);
+          let targetOption = visibleOptions.find((opt) => opt.textContent?.toLowerCase().includes("other"));
+          if (!targetOption) {
+            targetOption = visibleOptions.find((opt) => opt.textContent?.toLowerCase().includes("none")) || visibleOptions[1] || visibleOptions[0];
+          }
+          
+          if (targetOption) targetOption.click();
+        }
+      }
+
+      await sleep(800);
+      const details = document.querySelector<HTMLTextAreaElement>("textarea");
+      if (details) {
+        highlightElement(details);
+        await sleep(400);
+        details.value = "";
+        // Human-paced typing
+        for (let i = 0; i < reason.length; i++) {
+          details.value += reason[i];
+          triggerEvents(details);
+          await sleep(30 + Math.random() * 40); // 30-70ms per character
+        }
+      }
+
+      highlightElement(null);
+      await sleep(1000);
+      showModal();
+    };
+
+    void runAutoFill();
+  }
+
   computePageSignals();
+  checkAndAutoFillSafeBrowsing();
 })();

@@ -4,6 +4,7 @@ import {
   ExternalLink,
   FileText,
   Fish,
+  Flag,
   Link2,
   Loader2,
   RotateCcw,
@@ -229,6 +230,14 @@ export function Popup() {
     chrome.tabs.create({ url: `${apiBaseUrl}/?run=${runId}` });
   }
 
+  async function handleReportPage(url: string, reason?: string) {
+    try {
+      await chrome.runtime.sendMessage({ type: "REPORT_PHISHING", url, reason });
+    } catch {
+      // Extension context invalidated
+    }
+  }
+
   return (
     <div className="flex flex-col">
       {/* ── Header ──────────────────────────────────────────────── */}
@@ -238,6 +247,16 @@ export function Popup() {
         </div>
         <span className="font-display text-sm font-bold tracking-wide">security-copilot</span>
         <div className="ml-auto flex items-center gap-1">
+          {tab && (
+            <button
+              className="flex items-center gap-1 rounded-md bg-accent/15 px-2 py-1 text-xs font-bold text-accent transition-colors hover:bg-accent/25"
+              title="Report this page to Google Safe Browsing"
+              onClick={() => handleReportPage(tab.url, "Flagged as a deceptive site attempting to trick users into sharing sensitive information. Please investigate for potential phishing activity.")}
+            >
+              <Flag className="h-3.5 w-3.5" />
+              Report
+            </button>
+          )}
           <ThemeToggle />
           <button
             className="rounded-md p-1.5 text-fog-faint transition-colors duration-200 hover:bg-panel-raised hover:text-fog"
@@ -380,6 +399,28 @@ export function Popup() {
                                 {alt.title}
                               </a>
                             ))}
+                          </div>
+                        )}
+
+                        {/* Report to Google encouragement card */}
+                        {(view.verdict.label === "dangerous" || view.verdict.label === "suspicious") && (
+                          <div className="rounded-lg border border-accent/40 bg-accent/10 p-3 text-xs shadow-glow-accent">
+                            <div className="flex items-center justify-between font-bold text-accent mb-1">
+                              <span className="flex items-center gap-1">
+                                <Flag className="h-3.5 w-3.5" /> Help protect others
+                              </span>
+                              <span className="animate-pulse text-xs text-accent">← Click button below</span>
+                            </div>
+                            <p className="text-fog-dim mb-2.5 leading-relaxed">
+                              This site is flagged as dangerous/suspicious. Auto-fill a report to Google Safe Browsing:
+                            </p>
+                            <button
+                              onClick={() => handleReportPage(view.verdict.checkedUrl || tab.url, view.verdict.reason)}
+                              className="w-full flex items-center justify-center gap-2 rounded-lg bg-accent py-2 text-xs font-bold text-white transition-all hover:brightness-110 shadow-glow-accent"
+                            >
+                              <Flag className="h-3.5 w-3.5" />
+                              Report page to Google Safe Browsing ↗
+                            </button>
                           </div>
                         )}
 
