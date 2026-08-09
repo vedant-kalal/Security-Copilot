@@ -57,7 +57,7 @@ def load_baseline_from_csv(
     Isolation Forest's baseline (it should only ever be fit on normal
     traffic, never attack traffic)."""
     rows: list[list[float]] = []
-    with csv_path.open("r", newline="") as f:
+    with csv_path.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         # CICIDS2017's official CSVs prefix most header names with a stray
         # space (" Flow Duration", " Label", ...) — strip so alias/label
@@ -176,7 +176,8 @@ def main() -> None:
                 },
             },
             indent=2,
-        )
+        ),
+        encoding="utf-8",
     )
 
     print(f"Saved model     -> {model_path}")

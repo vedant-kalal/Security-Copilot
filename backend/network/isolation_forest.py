@@ -195,7 +195,7 @@ class AnomalyDetector:
     def _load_threshold(self) -> float:
         if self.threshold_path.exists():
             try:
-                data = json.loads(self.threshold_path.read_text())
+                data = json.loads(self.threshold_path.read_text(encoding="utf-8"))
                 return float(data["threshold"])
             except (ValueError, KeyError, OSError) as exc:
                 logger.warning("Could not read threshold sidecar %s (%s); recomputing from a synthetic holdout", self.threshold_path, exc)
