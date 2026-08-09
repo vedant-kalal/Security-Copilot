@@ -10,22 +10,33 @@ cheapest first:
      investigation already ran for this exact URL, reuse it instantly.
   2. The static blocklist (cache/blocklist.py) — known-bad domains.
   3. content_classifier's URL-only ONNX model, called directly — the same
-     model the full agent uses, skipping the agent/LLM loop.
+     model the full agent uses, skipping the agent/LLM loop. Scored against
+     the bare domain ("https://{domain}/"), not the full URL — phishing is
+     a property of who controls the domain, not which page on it, and
+     scoring the full URL made the result path-sensitive noise (see below).
   4. Corroborate with VirusTotal in both directions (skipped only if
      VT_API_KEY is unset, or already resolved from this endpoint's own
      short-lived cache below) — escalate a too-lenient ML verdict, or
      de-escalate a too-harsh one.
+  5. If the content script found a password field inside a form that
+     posts to a different site than the page itself, escalate — a strong,
+     independent signal a URL/VT-only check can't see at all (see
+     `_apply_page_signal`). Never applied after step 4 has already
+     de-escalated to "safe": once VirusTotal's vendor consensus vouches
+     for a domain, a single page-shape heuristic must not override that
+     back into a false alarm.
 
 Step 4 exists because the ONNX model is URL-string-only (no domain age,
 no reputation, nothing about who actually operates the site), and gets
-both kinds of call wrong on real sites:
+both kinds of call wrong on real sites even scored domain-only:
   - Verified 2026-08: a live phishing storefront scored 0.10 — "safe" —
     from the URL string alone, while VT already had 15 reputable vendors,
     including Kaspersky/ESET/Fortinet/Sophos, calling it phishing.
-  - Verified 2026-08: `https://chat.google.com/app/home` scored 0.88 —
-    "dangerous" — purely because of its URL shape (subdomain + short app
-    path, a pattern phishing kits also use), while VT shows 0 malicious/
-    suspicious vendors and 59 actively calling the domain harmless.
+  - Verified 2026-08: `https://login.microsoftonline.com/` scores 0.97 —
+    "dangerous" — even with no path at all, because the model treats a
+    "login." subdomain itself as characteristic of phishing kit naming
+    (which, divorced from who actually owns the domain, it often is),
+    while VT shows ~59 vendors actively calling the domain harmless.
 
 Both corrections use VT's raw vendor *counts*, not its ratio-based
 reputation_score: that score divides by every engine VT queried, most of
@@ -60,7 +71,7 @@ from config import get_settings
 from logger import get_logger
 from tools.content_classifier import score_url
 from tools.domain_reputation import _lookup_virustotal
-from utils.validators import extract_domain
+from utils.validators import extract_domain, same_registrable_domain
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -125,6 +136,37 @@ def _label_for_vt(vt_result: dict) -> tuple[str, float]:
 _LABEL_RANK = {"safe": 0, "unknown": 0, "suspicious": 1, "dangerous": 2}
 
 
+def _apply_page_signal(payload: QuickCheckRequest, label: str, confidence: float, source: str) -> dict:
+    """The one page-content signal this endpoint uses: a password field
+    inside a form whose action posts to a different site than the page
+    itself. Deliberately narrow — a password *field* alone is on countless
+    ordinary login pages and proves nothing; it's the combination with a
+    cross-site submit target that's the actual tell, and it's rare enough
+    on genuine sites (same_registrable_domain already forgives ordinary
+    subdomain-to-subdomain logins) that it's safe to escalate on directly.
+
+    Never pushes past "suspicious" unless the URL/VT signal already agreed
+    something was off — a single heuristic shouldn't be able to single-
+    handedly brand an otherwise-clean site "dangerous"."""
+    if not payload.cross_domain_password_form or not payload.action_domain:
+        return {"label": label, "confidence": confidence, "source": source}
+
+    page_domain = extract_domain(payload.url)
+    if same_registrable_domain(page_domain, payload.action_domain):
+        return {"label": label, "confidence": confidence, "source": source}
+
+    escalated_label = "dangerous" if label in ("suspicious", "dangerous") else "suspicious"
+    if _LABEL_RANK[escalated_label] > _LABEL_RANK[label]:
+        escalated_confidence = 0.8 if escalated_label == "dangerous" else 0.55
+        logger.info(
+            "quick-check page-signal escalated %s: password form submits to %s (was %s)",
+            page_domain, payload.action_domain, label,
+        )
+        return {"label": escalated_label, "confidence": max(confidence, escalated_confidence), "source": "page_signal"}
+
+    return {"label": label, "confidence": confidence, "source": source}
+
+
 @router.post("/quick-check-url", tags=["Links"])
 async def quick_check_url(payload: QuickCheckRequest) -> dict:
     cached = get_cached_verdict(payload.url)
@@ -138,7 +180,22 @@ async def quick_check_url(payload: QuickCheckRequest) -> dict:
     if is_blocklisted(payload.url):
         return {"label": "dangerous", "confidence": 1.0, "source": "blocklist"}
 
-    ml_result = await asyncio.to_thread(score_url, payload.url)
+    # Score the domain, not the full URL — phishing/legitimacy is a property
+    # of who controls the domain, not which page on it. Scoring the full URL
+    # made the model sensitive to path noise that has nothing to do with
+    # that: verified 2026-08 that the exact same legitimate domain
+    # (docs.python.org) scored "safe" (0.07) on one path and "dangerous"
+    # (0.79-0.98) on another, purely because that path happened to contain
+    # the word "login" — something almost every real site with a login page
+    # also does. Scoring "https://{domain}/" instead makes the result
+    # consistent for every page on a given site, and it's still fine for the
+    # one scenario this loses: a legitimate domain that's been compromised
+    # (or a subdomain host that's been handed to a phisher) and now serves a
+    # bad page at some specific path — that's exactly what the page-signal
+    # check below is for, and it looks at what the page actually does
+    # instead of guessing from URL text.
+    domain = extract_domain(payload.url)
+    ml_result = await asyncio.to_thread(score_url, f"https://{domain}/")
     if "error" in ml_result:
         # A model-loading hiccup degrades to "unknown," never a false "safe."
         return {"label": "unknown", "confidence": 0.0, "source": "error", "detail": ml_result["error"]}
@@ -147,19 +204,18 @@ async def quick_check_url(payload: QuickCheckRequest) -> dict:
     ml_label = _label_for_score(ml_score)
 
     if not get_settings().VT_API_KEY:
-        return {"label": ml_label, "confidence": ml_score, "source": "ml_model"}
+        return _apply_page_signal(payload, ml_label, ml_score, "ml_model")
 
-    # Corroborate with VirusTotal either way — the URL-only model has no
-    # domain history or reputation, so it can be too lenient (misses a live
-    # phishing site) just as easily as too harsh (flags a legitimate site
-    # whose URL shape happens to look phishy, e.g. a SaaS app's subdomain +
-    # short path). Fast (no headless browser, no LLM) and cached per-domain,
-    # so this doesn't slow the common case down by more than a fraction of a
-    # second after the first visit.
-    domain = extract_domain(payload.url)
+    # Corroborate with VirusTotal either way — the domain-only model still
+    # has no reputation or history, so it can be too lenient (misses a live
+    # phishing site) just as easily as too harsh (flags a legitimate but
+    # unusually-shaped domain, e.g. a SaaS app's subdomain). Fast (no
+    # headless browser, no LLM) and cached per-domain, so this doesn't slow
+    # the common case down by more than a fraction of a second after the
+    # first visit.
     vt_result = await _vt_lookup_cached(domain)
     if not vt_result.get("available"):
-        return {"label": ml_label, "confidence": ml_score, "source": "ml_model"}
+        return _apply_page_signal(payload, ml_label, ml_score, "ml_model")
 
     vt_label, vt_confidence = _label_for_vt(vt_result)
     if _LABEL_RANK[vt_label] > _LABEL_RANK[ml_label]:
@@ -167,7 +223,7 @@ async def quick_check_url(payload: QuickCheckRequest) -> dict:
             "quick-check escalated %s: ML said %s (%.2f), VT found %d malicious vendors",
             domain, ml_label, ml_score, vt_result.get("malicious_count", 0),
         )
-        return {"label": vt_label, "confidence": vt_confidence, "source": "virustotal"}
+        return _apply_page_signal(payload, vt_label, vt_confidence, "virustotal")
 
     vt_bad_count = vt_result.get("malicious_count", 0) + vt_result.get("suspicious_count", 0)
     if (
@@ -179,6 +235,9 @@ async def quick_check_url(payload: QuickCheckRequest) -> dict:
             "quick-check de-escalated %s: ML said %s (%.2f), VT found %d vendors actively vouching it's harmless (vs %d flagging it)",
             domain, ml_label, ml_score, vt_result.get("harmless_count", 0), vt_bad_count,
         )
+        # Hard stop, deliberately not routed through _apply_page_signal —
+        # see module docstring: strong VT consensus is the floor a single
+        # page-shape heuristic isn't allowed to override.
         return {"label": "safe", "confidence": vt_result.get("reputation_score", 0.0), "source": "virustotal"}
 
-    return {"label": ml_label, "confidence": ml_score, "source": "ml_model"}
+    return _apply_page_signal(payload, ml_label, ml_score, "ml_model")

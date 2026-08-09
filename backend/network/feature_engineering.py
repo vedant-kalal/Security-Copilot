@@ -9,9 +9,9 @@ rows, or any dict with compatible keys.
 
 Two feature sets live here, on purpose (they serve different jobs):
 
-  - `extract_features` / `FEATURE_NAMES` — the 10 CICIDS2017/UNSW-NB15
-    per-flow-row features (bytes/packets/duration columns). Used for
-    training and evaluating against *labeled datasets*.
+  - `extract_features` / `FEATURE_NAMES` — the 20 CICIDS2017/UNSW-NB15
+    per-flow-row features (bytes/packets/duration/timing/flag columns).
+    Used for training and evaluating against *labeled datasets*.
   - `extract_window_features` / `WINDOW_FEATURE_NAMES` — the 8 features
     `network/flow_collector.py` emits per 60-second window (connection
     count, unique destination/port counts, failed/reset ratio, sin/cos
@@ -25,6 +25,7 @@ fundamentally different shapes.
 """
 from __future__ import annotations
 
+import math
 from typing import Any, Dict, List
 
 FEATURE_NAMES: List[str] = [
@@ -38,6 +39,18 @@ FEATURE_NAMES: List[str] = [
     "dst_port",
     "packet_size_avg",
     "syn_flag_count",
+    # --- added to separate flood-style attacks the original 10 missed
+    # (uniform packet sizes, machine-regular timing, skewed flag mix) ---
+    "fwd_packet_length_std",
+    "bwd_packet_length_std",
+    "flow_iat_mean",
+    "flow_iat_std",
+    "fin_flag_count",
+    "rst_flag_count",
+    "ack_flag_count",
+    "packet_length_std",
+    "down_up_ratio",
+    "init_win_bytes_forward",
 ]
 
 _ALIASES: Dict[str, List[str]] = {
@@ -61,6 +74,16 @@ _ALIASES: Dict[str, List[str]] = {
     "dst_port": ["dst_port", "Destination Port", "dport"],
     "packet_size_avg": ["packet_size_avg", "Average Packet Size", "smean"],
     "syn_flag_count": ["syn_flag_count", "SYN Flag Count", "synack"],
+    "fwd_packet_length_std": ["fwd_packet_length_std", "Fwd Packet Length Std"],
+    "bwd_packet_length_std": ["bwd_packet_length_std", "Bwd Packet Length Std"],
+    "flow_iat_mean": ["flow_iat_mean", "Flow IAT Mean"],
+    "flow_iat_std": ["flow_iat_std", "Flow IAT Std"],
+    "fin_flag_count": ["fin_flag_count", "FIN Flag Count"],
+    "rst_flag_count": ["rst_flag_count", "RST Flag Count"],
+    "ack_flag_count": ["ack_flag_count", "ACK Flag Count"],
+    "packet_length_std": ["packet_length_std", "Packet Length Std"],
+    "down_up_ratio": ["down_up_ratio", "Down/Up Ratio"],
+    "init_win_bytes_forward": ["init_win_bytes_forward", "Init_Win_bytes_forward"],
 }
 
 _DEFAULTS: Dict[str, float] = {
@@ -74,6 +97,16 @@ _DEFAULTS: Dict[str, float] = {
     "dst_port": 443.0,
     "packet_size_avg": 100.0,
     "syn_flag_count": 1.0,
+    "fwd_packet_length_std": 50.0,
+    "bwd_packet_length_std": 50.0,
+    "flow_iat_mean": 1000.0,
+    "flow_iat_std": 500.0,
+    "fin_flag_count": 0.0,
+    "rst_flag_count": 0.0,
+    "ack_flag_count": 1.0,
+    "packet_length_std": 50.0,
+    "down_up_ratio": 1.0,
+    "init_win_bytes_forward": 8192.0,
 }
 
 
@@ -81,9 +114,14 @@ def _coerce_float(value: Any, default: float) -> float:
     try:
         if value is None:
             return default
-        return float(value)
+        result = float(value)
     except (TypeError, ValueError):
         return default
+    # CICIDS2017's Flow Bytes/s and Flow Packets/s columns contain literal
+    # "Infinity"/"NaN" strings for zero-duration flows — float() parses those
+    # without raising, so they must be caught explicitly or they poison
+    # StandardScaler.fit (which rejects non-finite input) downstream.
+    return result if math.isfinite(result) else default
 
 
 def extract_features(payload: Dict[str, Any]) -> List[float]:

@@ -20,6 +20,13 @@ class CheckEmailRequest(BaseModel):
 
 class QuickCheckRequest(BaseModel):
     url: str
+    # Set by the extension's content script when it finds a password field
+    # inside a <form> whose action posts to a different hostname than the
+    # page itself — a strong, well-established phishing tell (a fake login
+    # page harvesting credentials to an attacker-controlled server) that a
+    # URL-only model has no way to see. Only meaningful together.
+    cross_domain_password_form: bool = False
+    action_domain: Optional[str] = None
 
 
 class ReportFlowRequest(BaseModel):

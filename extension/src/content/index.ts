@@ -66,6 +66,20 @@
       .title.safe { color: #34D399; }
       .sub { color: #94A3B8; font-size: 11px; margin-top: 2px; }
       .msg { margin-top: 8px; color: #C7D2E3; }
+      .progress {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-top: 10px;
+        padding: 7px 10px;
+        border-radius: 8px;
+        background: #161D2E;
+        border: 1px solid #2D3A52;
+        color: #94A3B8;
+        font-size: 11.5px;
+        line-height: 1.4;
+      }
+      .progress .spinner { margin-right: 0; flex-shrink: 0; }
       .actions { display: flex; gap: 8px; margin-top: 12px; }
       button {
         flex: 1;
@@ -89,6 +103,17 @@
         font-size: 16px; padding: 0; width: auto; flex: none;
         line-height: 1;
       }
+      .spinner {
+        display: inline-block;
+        width: 11px; height: 11px;
+        margin-right: 6px;
+        vertical-align: -1px;
+        border: 2px solid rgba(255,255,255,0.35);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: sc-spin 0.7s linear infinite;
+      }
+      @keyframes sc-spin { to { transform: rotate(360deg); } }
     `;
     shadow.appendChild(style);
     return shadow;
@@ -112,6 +137,9 @@
       return label === "dangerous"
         ? "VirusTotal already has multiple security vendors flagging this domain as phishing/malicious."
         : "VirusTotal has at least one security vendor flagging this domain. Worth a closer look.";
+    }
+    if (source === "page_signal") {
+      return "This page has a login form that submits your password to a different, unrelated domain — a strong sign of credential phishing. Do not enter your password.";
     }
     return label === "dangerous"
       ? "This page's URL matches known phishing patterns. Avoid entering any credentials."
@@ -153,6 +181,7 @@
         </div>
       </div>
       <div class="msg">${messageFor(label, source)}</div>
+      <div class="progress" style="display:none;"></div>
       <div class="actions">
         <button class="full-report primary">Full report</button>
         <button class="dismiss">Dismiss</button>
@@ -189,11 +218,27 @@
     }
   }
 
-  function updateFullReportButton(text: string, disabled: boolean): void {
+  function updateFullReportButton(text: string, disabled: boolean, spinner = false): void {
     const btn = cardEl?.querySelector<HTMLButtonElement>(".full-report");
     if (!btn) return;
-    btn.textContent = text;
+    btn.innerHTML = spinner ? `<span class="spinner"></span>${text}` : text;
     btn.disabled = disabled;
+  }
+
+  // The live step narration (e.g. "Checking VirusTotal & domain
+  // registration history...") gets its own row instead of living inside
+  // the button — those labels are full sentences, and the button is a
+  // small pill with no room to wrap them.
+  function updateProgress(label: string | null): void {
+    const el = cardEl?.querySelector<HTMLDivElement>(".progress");
+    if (!el) return;
+    if (label === null) {
+      el.style.display = "none";
+      el.innerHTML = "";
+      return;
+    }
+    el.style.display = "flex";
+    el.innerHTML = `<span class="spinner"></span><span>${label}</span>`;
   }
 
   chrome.runtime.onMessage.addListener((message) => {
@@ -205,17 +250,69 @@
         hideBanner();
         break;
       case "FULL_CHECK_STARTED":
-        updateFullReportButton("Investigating...", true);
+        updateFullReportButton("Investigating...", true, true);
+        updateProgress("Starting investigation...");
+        break;
+      case "FULL_CHECK_PROGRESS":
+        updateProgress(message.label);
         break;
       case "FULL_CHECK_DONE":
-        updateFullReportButton("Opened in new tab", true);
+        updateFullReportButton("✓ Opened in new tab", true);
+        updateProgress(null);
         break;
       case "FULL_CHECK_FAILED":
         updateFullReportButton("Failed — retry", false);
+        updateProgress(null);
         break;
       default:
         break;
     }
     return false;
   });
+
+  // The one page-content signal this extension looks at: a password field
+  // inside a form that posts somewhere other than this page's own site —
+  // the classic shape of a credential-harvesting fake login page, and
+  // something background.ts's /quick-check-url can't see from the URL
+  // string alone. A password field by itself means nothing (nearly every
+  // real login page has one) — only reported when paired with a foreign
+  // submit target, and only that one fact is sent, never page content
+  // itself.
+  //
+  // Static-DOM only: a form whose submission is fully handled by JS
+  // (fetch()/XHR in a submit handler, no real `action` attribute) won't be
+  // caught here. That's a missed detection, not a false positive, which is
+  // the direction that matters — see routes_quick_check.py's docstring for
+  // why false positives are treated as the costlier mistake throughout
+  // this pipeline.
+  function computePageSignals(): void {
+    const passwordInputs = document.querySelectorAll<HTMLInputElement>('input[type="password"]');
+    for (const input of passwordInputs) {
+      const form = input.closest("form");
+      if (!form) continue;
+
+      const actionAttr = form.getAttribute("action");
+      let resolved: URL;
+      try {
+        resolved = new URL(actionAttr || "", location.href);
+      } catch {
+        continue;
+      }
+      if (resolved.protocol !== "http:" && resolved.protocol !== "https:") continue;
+      if (resolved.hostname === location.hostname) continue;
+
+      try {
+        chrome.runtime.sendMessage({
+          type: "PAGE_SIGNALS",
+          url: location.href,
+          actionDomain: resolved.hostname,
+        } satisfies { type: "PAGE_SIGNALS"; url: string; actionDomain: string });
+      } catch {
+        // Extension context invalidated (e.g. mid-update) — nothing to recover.
+      }
+      return; // one report is enough — background re-derives everything else itself
+    }
+  }
+
+  computePageSignals();
 })();

@@ -59,6 +59,12 @@ def load_baseline_from_csv(
     rows: list[list[float]] = []
     with csv_path.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
+        # CICIDS2017's official CSVs prefix most header names with a stray
+        # space (" Flow Duration", " Label", ...) — strip so alias/label
+        # matching below works against the real files, not just the bundled
+        # sample (which happens to already be clean).
+        if reader.fieldnames:
+            reader.fieldnames = [name.strip() for name in reader.fieldnames]
         label_col = next((c for c in reader.fieldnames or [] if c.lower() in ("label", "attack_cat")), None)
         for row in reader:
             if label_col and row.get(label_col, "").strip() not in benign_label_values:
