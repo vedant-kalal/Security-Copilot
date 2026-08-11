@@ -1,20 +1,30 @@
 #!/usr/bin/env bash
-# Starts the security-copilot backend (the only long-running process this
-# project has — the extension isn't a process, it's loaded into Chrome
-# separately, see extension/README.md). Run ./download_everything.bash
-# first if you haven't set anything up yet.
+# Starts the security-copilot backend plus the Next.js dashboard (the two
+# long-running processes this project has — the extension isn't a process,
+# it's loaded into Chrome separately, see extension/README.md). Run
+# ./download_everything.bash first if you haven't set anything up yet.
+#
+# Usage:
+#   ./start_all.bash                     # backend on :8010 + dashboard on :3000
+#   PORT=8020 ./start_all.bash           # different backend port
+#   WITH_DASHBOARD=0 ./start_all.bash    # backend only
+#   DASHBOARD_PORT=3005 ./start_all.bash # dashboard on a different port
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
+DASHBOARD_DIR="$ROOT_DIR/dashboard"
 VENV_DIR="$ROOT_DIR/.venv"
 
 # Ports 8000/8001 are commonly already taken by other local projects — this
 # project defaults to 8010 for exactly that reason. Override with:
 #   PORT=8020 ./start_all.bash
 PORT="${PORT:-8010}"
+DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
+WITH_DASHBOARD="${WITH_DASHBOARD:-1}"
 
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
+warn() { printf '\033[1;33m!! %s\033[0m\n' "$1"; }
 die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$1" >&2; exit 1; }
 
 [ -d "$VENV_DIR" ] || die ".venv not found at $VENV_DIR — run ./download_everything.bash first."
@@ -41,13 +51,51 @@ if ! grep -qE '^OPENROUTER_API_KEY=.+' .env; then
   printf '\033[1;33m!! No OPENROUTER_API_KEY set in backend/.env — the agent will fail on every case. Get a key at https://openrouter.ai/keys\033[0m\n'
 fi
 
+# Let the dashboard's browser origin (:3000) call the API. Overrides config.py's
+# default CORS list (no :3000 entry); the extension is still covered by the
+# chrome-extension:// regex in api/app.py.
+export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost,http://127.0.0.1,http://localhost:$DASHBOARD_PORT,http://127.0.0.1:$DASHBOARD_PORT}"
+
+cleanup() {
+  log "Shutting down"
+  [ -n "${BACKEND_PID:-}" ] && kill "$BACKEND_PID" 2>/dev/null || true
+  [ -n "${DASH_PID:-}" ]    && kill "$DASH_PID"    2>/dev/null || true
+}
+trap cleanup INT TERM EXIT
+
 log "Starting security-copilot backend on http://127.0.0.1:$PORT"
+"$VENV_PY" -m uvicorn api.app:app --host 127.0.0.1 --port "$PORT" --reload &
+BACKEND_PID=$!
+
+# --- Dashboard (Next.js dev server) --------------------------------------
+# NEXT_PUBLIC_API_BASE_URL points the dashboard at THIS backend's port (we run
+# on 8010, not the dashboard's built-in :8000 default). A URL set in the
+# dashboard's Settings page (localStorage) still overrides it per-browser.
+if [ "$WITH_DASHBOARD" = "1" ]; then
+  if command -v pnpm >/dev/null 2>&1; then
+    if [ ! -d "$DASHBOARD_DIR/node_modules" ]; then
+      log "Installing dashboard dependencies (first run)"
+      (cd "$DASHBOARD_DIR" && pnpm install)
+    fi
+    log "Starting dashboard on http://localhost:$DASHBOARD_PORT (API -> http://localhost:$PORT)"
+    (cd "$DASHBOARD_DIR" && NEXT_PUBLIC_API_BASE_URL="http://localhost:$PORT" pnpm dev --port "$DASHBOARD_PORT") &
+    DASH_PID=$!
+  else
+    warn "pnpm not found — skipping the dashboard. Install pnpm (https://pnpm.io), or run it yourself: cd dashboard && NEXT_PUBLIC_API_BASE_URL=http://localhost:$PORT pnpm dev"
+  fi
+else
+  warn "Dashboard disabled (WITH_DASHBOARD=0) — backend only."
+fi
+
 cat <<EOF
-  UI / history:      http://127.0.0.1:$PORT/
-  Health check:       http://127.0.0.1:$PORT/health
-  Extension:          load extension/dist/ as an unpacked extension in chrome://extensions
-                       (run 'cd extension && npm run build' first if you haven't)
-  Stop this server:   Ctrl+C
+
+  Dashboard:         http://localhost:$DASHBOARD_PORT/   (Next.js — the main UI)
+  UI / history:      http://127.0.0.1:$PORT/            (backend's built-in viewer)
+  Health check:      http://127.0.0.1:$PORT/health
+  Extension:         load extension/dist/ as an unpacked extension in chrome://extensions
+                      (run 'cd extension && npm run build' first if you haven't)
+  Stop everything:   Ctrl+C
 EOF
 
-exec "$VENV_PY" -m uvicorn api.app:app --host 127.0.0.1 --port "$PORT" --reload
+# Wait on the backend; the trap tears down the dashboard too on exit.
+wait "$BACKEND_PID"

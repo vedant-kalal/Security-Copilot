@@ -17,16 +17,21 @@
 #
 # Usage:
 #   ./run_all.bash                     # backend + native helper on :8010
-#   PORT=8020 ./run_all.bash           # different port
+#   PORT=8020 ./run_all.bash           # different backend port
 #   WITH_NATIVE_HOST=0 ./run_all.bash  # backend only (no live network monitoring)
+#   WITH_DASHBOARD=0 ./run_all.bash    # don't start the Next.js dashboard
+#   DASHBOARD_PORT=3005 ./run_all.bash # dashboard on a different port
 #   SKIP_MITRE=1 ./run_all.bash        # don't build the MITRE index if missing
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BACKEND_DIR="$ROOT_DIR/backend"
+DASHBOARD_DIR="$ROOT_DIR/dashboard"
 VENV_DIR="$ROOT_DIR/.venv"
 PORT="${PORT:-8010}"
+DASHBOARD_PORT="${DASHBOARD_PORT:-3000}"
 WITH_NATIVE_HOST="${WITH_NATIVE_HOST:-1}"
+WITH_DASHBOARD="${WITH_DASHBOARD:-1}"
 SKIP_MITRE="${SKIP_MITRE:-0}"
 
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$1"; }
@@ -86,8 +91,15 @@ cleanup() {
   log "Shutting down"
   [ -n "${BACKEND_PID:-}" ] && kill "$BACKEND_PID" 2>/dev/null || true
   [ -n "${HOST_PID:-}" ]    && kill "$HOST_PID"    2>/dev/null || true
+  [ -n "${DASH_PID:-}" ]    && kill "$DASH_PID"    2>/dev/null || true
 }
 trap cleanup INT TERM EXIT
+
+# Let the dashboard's browser origin (:3000) call the API. This overrides
+# config.py's default CORS list, which has no :3000 entry; the extension is
+# still covered by the chrome-extension:// regex in api/app.py, so it doesn't
+# need to be listed here.
+export CORS_ORIGINS="${CORS_ORIGINS:-http://localhost,http://127.0.0.1,http://localhost:$DASHBOARD_PORT,http://127.0.0.1:$DASHBOARD_PORT}"
 
 log "Starting backend on http://127.0.0.1:$PORT"
 "$VENV_PY" -m uvicorn api.app:app --host 127.0.0.1 --port "$PORT" &
@@ -109,9 +121,30 @@ else
   warn "Native helper disabled (WITH_NATIVE_HOST=0) — backend only."
 fi
 
+# --- Dashboard (Next.js dev server) --------------------------------------
+# NEXT_PUBLIC_API_BASE_URL points the dashboard at THIS backend's port (we run
+# on 8010, not the dashboard's built-in :8000 default). A URL set in the
+# dashboard's Settings page (localStorage) still overrides it per-browser.
+if [ "$WITH_DASHBOARD" = "1" ]; then
+  if command -v pnpm >/dev/null 2>&1; then
+    if [ ! -d "$DASHBOARD_DIR/node_modules" ]; then
+      log "Installing dashboard dependencies (first run)"
+      (cd "$DASHBOARD_DIR" && pnpm install)
+    fi
+    log "Starting dashboard on http://localhost:$DASHBOARD_PORT (API -> http://localhost:$PORT)"
+    (cd "$DASHBOARD_DIR" && NEXT_PUBLIC_API_BASE_URL="http://localhost:$PORT" pnpm dev --port "$DASHBOARD_PORT") &
+    DASH_PID=$!
+  else
+    warn "pnpm not found — skipping the dashboard. Install pnpm (https://pnpm.io), or run it yourself: cd dashboard && NEXT_PUBLIC_API_BASE_URL=http://localhost:$PORT pnpm dev"
+  fi
+else
+  warn "Dashboard disabled (WITH_DASHBOARD=0) — backend only."
+fi
+
 cat <<EOF
 
-  UI / history:      http://127.0.0.1:$PORT/
+  Dashboard:         http://localhost:$DASHBOARD_PORT/   (Next.js — the main UI)
+  UI / history:      http://127.0.0.1:$PORT/            (backend's built-in viewer)
   Health check:      http://127.0.0.1:$PORT/health
   Extension:         load extension/dist/ as an unpacked extension in chrome://extensions
   Demo triggers      (run from the repo root in another terminal):
