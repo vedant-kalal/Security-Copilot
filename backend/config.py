@@ -144,6 +144,13 @@ class Settings(BaseSettings):
         "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
     )
 
+    # memory/case_index.py — a growing similarity index over past
+    # investigations (SecureBERT again, but raw/un-whitened: unlike the
+    # fixed ~700-technique MITRE corpus, this one grows one case at a time,
+    # so there's no fixed corpus to fit a PCA-whitening projection over).
+    CASE_MEMORY_DIR: str = "data/case_memory"
+    CASE_MEMORY_TOP_K: int = 3
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT.lower() == "production"

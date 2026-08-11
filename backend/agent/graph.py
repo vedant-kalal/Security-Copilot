@@ -7,6 +7,7 @@ agent_node.py, output_node.py) so this file stays a pure wiring diagram.
 """
 from __future__ import annotations
 
+import asyncio
 from functools import lru_cache
 from typing import Optional
 
@@ -22,6 +23,7 @@ from config import get_settings
 from exceptions import LLMRateLimitedError
 from history import record_run
 from logger import get_logger
+from memory.case_index import record_case
 from report import generate_report
 from tools import ALL_TOOLS
 from utils.screenshots import save_screenshot
@@ -208,6 +210,17 @@ async def stream_case_traced(case_type: CaseType, raw_input: str, mitre_techniqu
     yield {"type": "progress", "label": "Finalizing the verdict & saving the report..."}
     report_path = generate_report(case_type, raw_input, tool_call_records, verdict)
     run_id = record_run(case_type, raw_input, tool_call_records, verdict, report_path)
+
+    # Only remember *fresh* investigations — tool_call_records is empty for
+    # a router shortcut (cache/blocklist hit, see route_after_router), which
+    # never produced any new reasoning worth recalling later. Awaited (not
+    # fire-and-forget) so it can't be silently GC'd mid-write; runs off the
+    # event loop since this is a real SecureBERT forward pass, same as every
+    # other embedding call in this codebase.
+    if tool_call_records and verdict:
+        await asyncio.to_thread(
+            record_case, run_id, case_type, raw_input, verdict.get("label", ""), verdict.get("reason", "")
+        )
 
     yield {"type": "done", "verdict": verdict, "run_id": run_id, "report_path": report_path}
 

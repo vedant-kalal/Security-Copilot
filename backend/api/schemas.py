@@ -43,3 +43,22 @@ class ReportFlowRequest(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     service: str
+
+
+class ReportRequest(BaseModel):
+    url: str
+
+
+class VirusTotalReportResult(BaseModel):
+    reported: bool
+    detail: str
+
+
+class ReportResponse(BaseModel):
+    domain: str
+    added_to_blocklist: bool
+    virustotal: VirusTotalReportResult
+
+
+class BlocklistResponse(BaseModel):
+    domains: list[str]

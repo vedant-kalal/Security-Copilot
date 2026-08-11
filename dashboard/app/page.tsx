@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import {
   Activity,
   AlertTriangle,
@@ -10,7 +11,6 @@ import {
   ChevronRight,
   CircleHelp,
   Clock3,
-  Copy,
   FileText,
   Inbox,
   Link2,
@@ -24,13 +24,12 @@ import {
   Settings2,
   ShieldCheck,
   SlidersHorizontal,
-  Sparkles,
   Sun,
   Moon,
   X,
 } from 'lucide-react'
 import { ApiError, apiGet, apiPost, apiPostStream, getApiBaseUrl, setApiBaseUrl } from '@/lib/api'
-import type { RunDetail, RunSummary, VerdictLabel } from '@/lib/types'
+import type { RunSummary, VerdictLabel } from '@/lib/types'
 
 type View = 'Overview' | 'Link scans' | 'Email scans' | 'Anomalies' | 'History' | 'Settings'
 type Severity = 'Critical' | 'High' | 'Medium' | 'Low' | 'Safe' | 'Unknown'
@@ -133,53 +132,32 @@ function SectionTitle({ eyebrow, title, children }: { eyebrow: string; title: st
 }
 
 export default function Page() {
+  const router = useRouter()
   const [view, setView] = useState<View>('Overview')
   const [dark, setDark] = useState(true)
   const [mobileNav, setMobileNav] = useState(false)
 
-  const [selected, setSelected] = useState<Run | null>(null)
-  const [detail, setDetail] = useState<RunDetail | null>(null)
-  const [detailError, setDetailError] = useState<string | null>(null)
-  const [copied, setCopied] = useState(false)
-
+  // Every run now opens its own full page (dashboard/app/run/[id]/page.tsx)
+  // instead of a modal here — a screenshot, the full VirusTotal vendor
+  // breakdown, and the sandbox's page-content findings need real room, and
+  // a real URL per run is what makes the extension's "Full report" able to
+  // deep-link straight to one (background.ts's runFullCheck).
   function openRun(run: Run) {
-    setSelected(run)
-    setDetail(null)
-    setDetailError(null)
-    setCopied(false)
-    apiGet<RunDetail>(`/runs/${run.id}`)
-      .then(setDetail)
-      .catch((err) => setDetailError(errorMessage(err)))
+    router.push(`/run/${run.id}`)
   }
 
-  function closeRun() {
-    setSelected(null)
-    setDetail(null)
-  }
+  // Old-style deep link (`/?run=<id>`, from before the dedicated /run/[id]
+  // route existed) — redirect rather than break it, in case anything still
+  // links to it (e.g. a bookmark, or a report generated before this change).
+  useEffect(() => {
+    const runId = new URLSearchParams(window.location.search).get('run')
+    if (runId) router.replace(`/run/${runId}`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   function openView(next: View) {
     setView(next)
     setMobileNav(false)
-    closeRun()
-  }
-
-  const mitigation = detail?.verdict?.mitigation
-  const alternatives = detail?.verdict?.legitimate_alternatives ?? []
-  const reason = detail?.verdict?.reason || selected?.detail || ''
-
-  function copyReport() {
-    if (!selected) return
-    const lines = [
-      `Run ${selected.id}`,
-      `Target: ${selected.target}`,
-      `Verdict: ${selected.verdict} (${selected.score}/100)`,
-      reason && `Reason: ${reason}`,
-      mitigation && `Mitigation: ${mitigation}`,
-    ].filter(Boolean)
-    navigator.clipboard?.writeText(lines.join('\n')).then(() => {
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    })
   }
 
   return (
@@ -256,76 +234,13 @@ export default function Page() {
         </header>
         <div className="page-wrap">
           {view === 'Overview' && <Overview onNavigate={openView} onSelect={openRun} />}
-          {view === 'Link scans' && <LinkScan />}
-          {view === 'Email scans' && <EmailScan />}
+          {view === 'Link scans' && <LinkScan onSelect={openRun} />}
+          {view === 'Email scans' && <EmailScan onSelect={openRun} />}
           {view === 'Anomalies' && <Anomalies onSelect={openRun} />}
           {view === 'History' && <History onSelect={openRun} />}
           {view === 'Settings' && <SettingsView />}
         </div>
       </main>
-
-      {selected && (
-        <div className="modal-backdrop" onClick={closeRun}>
-          <section className="detail-modal" onClick={(e) => e.stopPropagation()}>
-            <button className="modal-close icon-button" onClick={closeRun} aria-label="Close details">
-              <X size={18} />
-            </button>
-            <p className="eyebrow">Investigation / {selected.id}</p>
-            <h2>{selected.target}</h2>
-            <div className="modal-meta">
-              <Badge verdict={selected.verdict} />
-              <span>
-                Risk score <strong>{selected.score}/100</strong>
-              </span>
-              <span>{selected.time}</span>
-            </div>
-            {detailError ? (
-              <div className="detail-box">
-                <AlertTriangle size={17} />
-                <p>{detailError}</p>
-              </div>
-            ) : !detail ? (
-              <div className="detail-box">
-                <Loader2 className="spin" size={17} />
-                <p>Loading full investigation…</p>
-              </div>
-            ) : (
-              <>
-                <div className="detail-box">
-                  <Sparkles size={17} />
-                  <p>{reason || 'No reasoning was recorded for this run.'}</p>
-                </div>
-                {mitigation && (
-                  <div className="detail-box">
-                    <ShieldCheck size={17} />
-                    <p>{mitigation}</p>
-                  </div>
-                )}
-                {alternatives.length > 0 && (
-                  <div className="alt-links">
-                    <p className="eyebrow">Legitimate alternatives</p>
-                    {alternatives.map((alt) => (
-                      <a key={alt.url} href={alt.url} target="_blank" rel="noreferrer">
-                        <Link2 size={13} />
-                        {alt.title}
-                      </a>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-            <div className="detail-actions">
-              <button className="button secondary" onClick={copyReport}>
-                {copied ? <Check size={15} /> : <Copy size={15} />}
-                {copied ? 'Copied' : 'Copy report'}
-              </button>
-              <button className="button primary" onClick={closeRun}>
-                Close investigation
-              </button>
-            </div>
-          </section>
-        </div>
-      )}
     </div>
   )
 }
@@ -655,12 +570,15 @@ function ResultCard({ target, sev, score, reason, mitigation }: { target: string
   )
 }
 
-function LinkScan() {
+function LinkScan({ onSelect }: { onSelect: (r: Run) => void }) {
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
   const [steps, setSteps] = useState<string[]>([])
   const [result, setResult] = useState<{ sev: Severity; score: number; reason: string; mitigation: string | null; target: string } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { runs, error: runsError } = useRuns('/runs?view=phishing&limit=100')
+  const loadingRuns = runs === null && !runsError
+  const rows = (runs ?? []).filter((r) => r.case_type === 'link').map(runFromSummary)
 
   async function run() {
     const url = input.trim()
@@ -762,15 +680,27 @@ function LinkScan() {
         </section>
         <SignalCoverage isLink />
       </div>
+      <section className="panel runs-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Past link scans</p>
+            <h2>Recent link investigations</h2>
+          </div>
+        </div>
+        <RunTable runs={rows} onSelect={onSelect} loading={loadingRuns} error={runsError} />
+      </section>
     </>
   )
 }
 
-function EmailScan() {
+function EmailScan({ onSelect }: { onSelect: (r: Run) => void }) {
   const [input, setInput] = useState('')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<{ sev: Severity; score: number; reason: string; mitigation: string | null } | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const { runs, error: runsError } = useRuns('/runs?view=phishing&limit=100')
+  const loadingRuns = runs === null && !runsError
+  const rows = (runs ?? []).filter((r) => r.case_type === 'email').map(runFromSummary)
 
   async function run() {
     const text = input.trim()
@@ -852,6 +782,15 @@ function EmailScan() {
         </section>
         <SignalCoverage isLink={false} />
       </div>
+      <section className="panel runs-panel">
+        <div className="panel-header">
+          <div>
+            <p className="eyebrow">Past email scans</p>
+            <h2>Recent email investigations</h2>
+          </div>
+        </div>
+        <RunTable runs={rows} onSelect={onSelect} loading={loadingRuns} error={runsError} />
+      </section>
     </>
   )
 }

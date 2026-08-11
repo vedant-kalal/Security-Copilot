@@ -91,4 +91,22 @@ export type ContentToBackgroundMessage =
   // form whose action posts to a different site than the page itself —
   // see content/index.ts's computePageSignals(). Not sent otherwise, so
   // its mere arrival already means something's worth a second look.
-  | { type: "PAGE_SIGNALS"; url: string; actionDomain: string };
+  | { type: "PAGE_SIGNALS"; url: string; actionDomain: string }
+  // From the popup, right after a successful POST /report — tells
+  // background.ts to re-fetch GET /blocklist immediately instead of
+  // waiting for its periodic chrome.alarms sync, so the domain just
+  // reported is enforced on the very next navigation, not several
+  // minutes later.
+  | { type: "REFRESH_BLOCKLIST" }
+  // From blocked/Blocked.tsx's "Proceed anyway" — background.ts records
+  // this exact URL as a one-time exception before Blocked.tsx navigates
+  // there itself, so onBeforeNavigate lets that one attempt through
+  // instead of immediately redirecting back to the same interstitial.
+  | { type: "ALLOW_ONCE"; url: string };
+
+/** POST /report response (backend/api/routes_report.py). */
+export interface ReportResponse {
+  domain: string;
+  added_to_blocklist: boolean;
+  virustotal: { reported: boolean; detail: string };
+}

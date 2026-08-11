@@ -35,16 +35,19 @@ cache/                  The router's fast path storage.
   blocklist.py               Static blocklist loader (data/blocklist.txt).
 
 api/                    FastAPI app (spec section 10). One file per route.
-  app.py                    CORS + middleware + router mounting + serves the UI. Run this with uvicorn.
+  app.py                    CORS + middleware + router mounting. Run this with uvicorn.
   schemas.py                  Request/response models.
   routes_check_links.py         POST /check-links
-  routes_check_email.py           POST /check-email
-  routes_report_flow.py             POST /report-flow
-  routes_runs.py                      GET /runs, GET /runs/{id} — history, for the UI
-  routes_health.py                      GET /health
+  routes_check_links_stream.py    POST /check-links-stream — same, as Server-Sent Events (live agent progress).
+  routes_check_email.py             POST /check-email
+  routes_quick_check.py               POST /quick-check-url — fast ML+VT pre-check, no LLM.
+  routes_report_flow.py                 POST /report-flow
+  routes_runs.py                          GET /runs, GET /runs/{id} — history, consumed by dashboard/.
+  routes_health.py                          GET /health
 
-ui/index.html           Single-file history/report viewer — submit a URL, browse past runs, see
-                         screenshots inline. Served at http://localhost:8000/ by api/app.py.
+The UI lives entirely in dashboard/ (a separate Next.js app, its own dev
+server — see the repo root README) — the backend itself has no UI routes,
+just the JSON/SSE API above.
 
 network/                Network anomaly detection (spec section 5) — PARTIALLY BUILT.
 mitre/                   MITRE ATT&CK mapping + remediation (spec section 6/7) — STUBBED.

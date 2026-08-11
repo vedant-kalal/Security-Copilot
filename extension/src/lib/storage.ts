@@ -7,11 +7,18 @@
  */
 export interface CopilotStorage {
   apiBaseUrl: string;
+  // Separate from apiBaseUrl on purpose: the Next.js dashboard (dashboard/)
+  // is its own dev server on its own port (:3000 by default), not something
+  // the FastAPI backend (:8010) serves — see run_all.bash/start_all.bash's
+  // WITH_DASHBOARD/DASHBOARD_PORT. This is where "Full report" and automatic
+  // report tabs open a run, instead of the backend's own built-in viewer.
+  dashboardBaseUrl: string;
   autoScanEnabled: boolean;
 }
 
 const DEFAULTS: CopilotStorage = {
   apiBaseUrl: "http://127.0.0.1:8010",
+  dashboardBaseUrl: "http://localhost:3000",
   autoScanEnabled: true,
 };
 

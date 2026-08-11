@@ -54,6 +54,90 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   lastAppliedByTab.delete(tabId);
 });
 
+// ── Blocklist enforcement ──────────────────────────────────────────────
+//
+// A domain lands here after the popup's "Report & block" action (POST
+// /report — see Popup.tsx) adds it to the backend's static blocklist.
+// This is a local mirror of that list, synced periodically plus right
+// after every report, so onBeforeNavigate below can decide in-process
+// without a network round trip — the backend call already happened once,
+// at report time, not on every subsequent navigation.
+//
+// Not a hard security boundary: this is a same-process JS check racing
+// real navigation, not a declarativeNetRequest rule enforced by the
+// browser itself, so a sufficiently fast redirect chain could in theory
+// slip through. Acceptable for what this is — a personal safety net
+// against a phishing page the user already investigated and blocked
+// themselves, not a managed security boundary against a resourced
+// adversary.
+const BLOCKED_DOMAINS_KEY = "blockedDomains";
+const SYNC_ALARM_NAME = "sync-blocklist";
+const SYNC_INTERVAL_MINUTES = 15;
+
+let blockedDomains = new Set<string>();
+
+// A URL the user explicitly chose to proceed to anyway (Blocked.tsx) —
+// let exactly one more attempt at it through, then forget it. Cleared
+// after ALLOW_ONCE_TTL_MS as a safety net in case it's never consumed
+// (e.g. the tab closed before navigating).
+const ALLOW_ONCE_TTL_MS = 30_000;
+const allowOnceUrls = new Set<string>();
+
+function allowOnce(url: string): void {
+  allowOnceUrls.add(url);
+  setTimeout(() => allowOnceUrls.delete(url), ALLOW_ONCE_TTL_MS);
+}
+
+async function loadBlockedDomainsFromStorage(): Promise<void> {
+  const stored = await chrome.storage.local.get(BLOCKED_DOMAINS_KEY);
+  const domains = stored[BLOCKED_DOMAINS_KEY] as string[] | undefined;
+  if (domains) blockedDomains = new Set(domains);
+}
+
+async function syncBlocklist(): Promise<void> {
+  try {
+    const { domains } = await api.get<{ domains: string[] }>("/blocklist");
+    blockedDomains = new Set(domains);
+    await chrome.storage.local.set({ [BLOCKED_DOMAINS_KEY]: domains });
+  } catch (error) {
+    // Backend unreachable — keep whatever was last synced (or nothing,
+    // on a very first run) rather than clearing a list that's still
+    // probably accurate.
+    console.warn("security-copilot: blocklist sync failed", error);
+  }
+}
+
+// Mirrors backend/cache/blocklist.py's is_blocklisted: an entry can be
+// either a bare domain or a full URL, and either one is a match.
+function isBlockedNavigation(url: string): boolean {
+  if (blockedDomains.size === 0) return false;
+  try {
+    const hostname = new URL(url).hostname.toLowerCase();
+    return blockedDomains.has(hostname) || blockedDomains.has(url.toLowerCase());
+  } catch {
+    return false;
+  }
+}
+
+// Loaded from storage immediately (fast, survives service-worker restarts)
+// every time this module evaluates — which is every service-worker wake,
+// not just browser startup — then refreshed from the backend right after.
+void loadBlockedDomainsFromStorage().then(() => void syncBlocklist());
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === SYNC_ALARM_NAME) void syncBlocklist();
+});
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.alarms.create(SYNC_ALARM_NAME, { periodInMinutes: SYNC_INTERVAL_MINUTES });
+});
+// onInstalled only fires on install/update, not on every browser start —
+// this covers the "extension already installed, browser just launched,
+// no alarm exists yet this session" case. chrome.alarms.create is a
+// no-op if one by this name is already scheduled.
+chrome.runtime.onStartup.addListener(() => {
+  chrome.alarms.create(SYNC_ALARM_NAME, { periodInMinutes: SYNC_INTERVAL_MINUTES });
+});
+
 function shouldSkip(url: string, apiBaseUrl: string): boolean {
   if (!url.startsWith("http://") && !url.startsWith("https://")) return true;
   try {
@@ -212,6 +296,24 @@ chrome.webNavigation.onCommitted.addListener((details) => {
   void scanNavigation(details.tabId, details.url);
 });
 
+// Fires before the navigation commits — the only event early enough to
+// redirect away instead of letting a blocklisted page load first and
+// showing a banner on top of it (what onCommitted above does for the
+// automatic scan). Deliberately synchronous against the in-memory
+// blockedDomains Set (see the "Blocklist enforcement" section above)
+// rather than awaiting a fresh /blocklist call here — a network round
+// trip on every single navigation would be real, user-visible latency
+// for a check that's almost always going to say "not blocked."
+chrome.webNavigation.onBeforeNavigate.addListener((details) => {
+  if (details.frameId !== 0) return;
+  if (allowOnceUrls.delete(details.url)) return; // consumed — let this one attempt through
+  if (!isBlockedNavigation(details.url)) return;
+
+  void chrome.tabs.update(details.tabId, {
+    url: chrome.runtime.getURL(`blocked.html?url=${encodeURIComponent(details.url)}`),
+  });
+});
+
 // The content script only ever sends PAGE_SIGNALS when it found a password
 // field posting to a different site than the page itself — see
 // content/index.ts's computePageSignals(). Re-runs the same quick-check
@@ -288,7 +390,7 @@ async function runFullCheck(tabId: number, url: string): Promise<void> {
   const stopKeepAlive = startKeepAlive();
   await sendToTab(tabId, { type: "FULL_CHECK_STARTED" });
   try {
-    const { apiBaseUrl } = await getStorage();
+    const { apiBaseUrl, dashboardBaseUrl } = await getStorage();
     const response = await fetch(`${apiBaseUrl}/check-links-stream`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -329,8 +431,10 @@ async function runFullCheck(tabId: number, url: string): Promise<void> {
     await sendToTab(tabId, { type: "FULL_CHECK_DONE", runId: final.run_id, label: v.label, confidence: v.confidence });
 
     // Content scripts can't open tabs — the background does it, since it
-    // already has both the base URL and the run_id in hand.
-    chrome.tabs.create({ url: `${apiBaseUrl}/?run=${final.run_id}` });
+    // already has the dashboard's base URL and the run_id in hand. Opens
+    // the Next.js dashboard's dedicated /run/[id] page (dashboard/app/run/
+    // [id]/page.tsx) — a full page, not the small in-app modal.
+    chrome.tabs.create({ url: `${dashboardBaseUrl}/run/${final.run_id}` });
   } catch (error) {
     await clearPendingFullCheck(tabId);
     const message = error instanceof ApiError ? error.message : "Full check failed.";
@@ -349,6 +453,10 @@ chrome.runtime.onMessage.addListener((message: ContentToBackgroundMessage, sende
     if (tabId !== undefined) void runFullCheck(tabId, message.url);
   } else if (message.type === "PAGE_SIGNALS" && sender.tab?.id !== undefined) {
     void handlePageSignals(sender.tab.id, message.url, message.actionDomain);
+  } else if (message.type === "REFRESH_BLOCKLIST") {
+    void syncBlocklist();
+  } else if (message.type === "ALLOW_ONCE") {
+    allowOnce(message.url);
   }
   return false;
 });

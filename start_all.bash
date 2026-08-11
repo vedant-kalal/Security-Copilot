@@ -89,8 +89,7 @@ fi
 
 cat <<EOF
 
-  Dashboard:         http://localhost:$DASHBOARD_PORT/   (Next.js — the main UI)
-  UI / history:      http://127.0.0.1:$PORT/            (backend's built-in viewer)
+  Dashboard:         http://localhost:$DASHBOARD_PORT/   (the UI)
   Health check:      http://127.0.0.1:$PORT/health
   Extension:         load extension/dist/ as an unpacked extension in chrome://extensions
                       (run 'cd extension && npm run build' first if you haven't)

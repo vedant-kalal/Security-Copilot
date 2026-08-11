@@ -1,6 +1,7 @@
 import {
   Activity,
   AlertTriangle,
+  Ban,
   ExternalLink,
   FileText,
   Fish,
@@ -19,7 +20,13 @@ import { AnomalyView } from "@/popup/AnomalyView";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import { api, ApiError } from "@/lib/api";
 import { getPendingFullCheck, getStorage, getTabVerdict, setTabVerdict, type PendingFullCheck, type TabVerdict } from "@/lib/storage";
-import type { CheckEmailResponse } from "@/types";
+import type { CheckEmailResponse, ReportResponse } from "@/types";
+
+type ReportState =
+  | { url: string; status: "idle" }
+  | { url: string; status: "loading" }
+  | { url: string; status: "done"; result: ReportResponse }
+  | { url: string; status: "error"; message: string };
 
 const MAX_PAGE_TEXT_CHARS = 20000;
 
@@ -68,6 +75,7 @@ function labelMeta(label: TabVerdict["label"]) {
 export function Popup() {
   const [mode, setMode] = useState<Mode>("phishing");
   const [view, setView] = useState<View>({ status: "loading" });
+  const [reportState, setReportState] = useState<ReportState>({ url: "", status: "idle" });
   const tab = "tab" in view ? view.tab : null;
 
   useEffect(() => {
@@ -225,8 +233,25 @@ export function Popup() {
   }
 
   async function handleViewReport(runId: string) {
-    const { apiBaseUrl } = await getStorage();
-    chrome.tabs.create({ url: `${apiBaseUrl}/?run=${runId}` });
+    const { dashboardBaseUrl } = await getStorage();
+    chrome.tabs.create({ url: `${dashboardBaseUrl}/run/${runId}` });
+  }
+
+  // Reports the URL to VirusTotal and adds its domain to this tool's own
+  // blocklist (backend/reporting.py's module docstring has the full
+  // reasoning: this is the legal, effective alternative to attacking the
+  // site back). REFRESH_BLOCKLIST tells background.ts to re-sync its
+  // local copy immediately, so onBeforeNavigate enforces this domain on
+  // the very next navigation rather than waiting for the periodic alarm.
+  async function handleReportBlock(url: string) {
+    setReportState({ url, status: "loading" });
+    try {
+      const result = await api.post<ReportResponse>("/report", { url });
+      setReportState({ url, status: "done", result });
+      void chrome.runtime.sendMessage({ type: "REFRESH_BLOCKLIST" });
+    } catch (error) {
+      setReportState({ url, status: "error", message: error instanceof ApiError ? error.message : "Report failed." });
+    }
   }
 
   return (
@@ -401,6 +426,39 @@ export function Popup() {
                             Dismiss
                           </button>
                         </div>
+
+                        {/* Report & block — only for a real, confirmed-bad verdict */}
+                        {(view.verdict.label === "dangerous" || view.verdict.label === "suspicious") &&
+                          (() => {
+                            const url = view.verdict.checkedUrl;
+                            const rs = reportState.url === url ? reportState : { url, status: "idle" as const };
+                            if (rs.status === "done") {
+                              return (
+                                <p className="flex items-center gap-2 pt-1 text-xs text-fog-faint">
+                                  <Ban className="h-3.5 w-3.5 shrink-0 text-threat-critical" />
+                                  {rs.result.added_to_blocklist ? "Blocked" : "Already blocked"} on this device
+                                  {rs.result.virustotal.reported ? " and reported to VirusTotal." : "."}
+                                </p>
+                              );
+                            }
+                            return (
+                              <div className="pt-1">
+                                <button
+                                  disabled={rs.status === "loading"}
+                                  onClick={() => handleReportBlock(url)}
+                                  className="flex w-full items-center justify-center gap-2 rounded-lg border border-threat-critical/30 bg-threat-critical/5 py-2.5 text-xs font-medium text-threat-critical transition-all duration-200 hover:bg-threat-critical/10 disabled:opacity-40"
+                                >
+                                  {rs.status === "loading" ? (
+                                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Ban className="h-3.5 w-3.5" />
+                                  )}
+                                  Report & block this site
+                                </button>
+                                {rs.status === "error" && <p className="mt-1.5 text-xs text-threat-critical">{rs.message}</p>}
+                              </div>
+                            );
+                          })()}
                       </div>
                     );
                   })()}

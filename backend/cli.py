@@ -26,6 +26,7 @@ from agent.graph import build_graph
 from config import get_settings
 from history import record_run
 from logger import configure_logging
+from memory.case_index import record_case
 from report import generate_report
 from utils.screenshots import save_screenshot
 from utils.tool_messages import extract_full_result
@@ -105,7 +106,16 @@ async def _run(case_type: str, raw_input: str) -> None:
         print(f"\n--- inconclusive ---\n  Hit the recursion limit ({settings.AGENT_RECURSION_LIMIT} steps) without the agent reaching a final verdict.")
 
     report_path = generate_report(case_type, raw_input, tool_call_records, verdict)
-    record_run(case_type, raw_input, tool_call_records, verdict, report_path)
+    run_id = record_run(case_type, raw_input, tool_call_records, verdict, report_path)
+
+    # Same "was this a fresh investigation, not a router shortcut" guard as
+    # agent/graph.py::stream_case_traced — this harness duplicates that
+    # function's loop instead of calling it (for the richer live printing
+    # below), so it has to duplicate this guarded call too or terminal runs
+    # would never contribute to the case-memory index.
+    if tool_call_records and verdict:
+        await asyncio.to_thread(record_case, run_id, case_type, raw_input, verdict.get("label", ""), verdict.get("reason", ""))
+
     print(f"\nFull report saved: {report_path}")
 
 

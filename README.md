@@ -104,7 +104,7 @@ they're missing (the index step downloads ~500MB once — see [below](#network-a
 Subsequent runs skip straight to launching the services. Prefer the backend alone (no live network monitoring)?
 Use the original `./start_all.bash`, or `WITH_NATIVE_HOST=0 ./run_all.bash`.
 
-Open **http://127.0.0.1:8010/** for the history/report UI, or use the CLI:
+Open **http://localhost:3000/** for the dashboard (history, reports, live scans), or use the CLI:
 
 ```bash
 source .venv/bin/activate && cd backend
