@@ -1,0 +1,1191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Security-Copilot — Interactive Presentation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.0/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+:root{
+  --bg:#080D16; --panel:#0F1622; --panel2:#16202F; --raised:#1C2839;
+  --border:rgba(128,150,185,.13); --border-strong:rgba(128,150,185,.28);
+  --text:#E8EDF5; --muted:#828FA6; --dim:#525C72;
+  --cyan:#4EC6D2; --cyan-dim:rgba(78,198,210,.12);
+  --amber:#E0A244; --amber-dim:rgba(224,162,68,.13);
+  --red:#E85D62; --red-dim:rgba(232,93,98,.13);
+  --green:#3EC48D; --green-dim:rgba(62,196,141,.13);
+  --teal:#3D93A0;
+  --radius:10px;
+  --disp:'Space Grotesk',sans-serif; --body:'Inter',sans-serif; --mono:'JetBrains Mono',monospace;
+}
+*{box-sizing:border-box; margin:0; padding:0;}
+html,body{height:100%;}
+body{
+  background:var(--bg); color:var(--text); font-family:var(--body);
+  overflow:hidden; position:relative;
+}
+@media (prefers-reduced-motion:reduce){ *{animation-duration:.001ms !important; transition-duration:.001ms !important;} }
+
+/* ---------- background grid ---------- */
+.bg-grid{
+  position:fixed; inset:0; z-index:0; pointer-events:none;
+  background-image:
+    radial-gradient(ellipse 900px 500px at 15% -10%, rgba(78,198,210,.06), transparent 60%),
+    radial-gradient(ellipse 700px 500px at 100% 100%, rgba(61,147,160,.05), transparent 60%),
+    linear-gradient(var(--border) 1px, transparent 1px),
+    linear-gradient(90deg, var(--border) 1px, transparent 1px);
+  background-size:100% 100%,100% 100%,64px 64px,64px 64px;
+  opacity:.5;
+}
+
+/* ---------- trace strip (signature element) ---------- */
+.trace-strip{
+  position:fixed; top:0; left:0; right:0; height:34px; z-index:50;
+  display:flex; align-items:center; gap:10px; padding:0 18px;
+  background:linear-gradient(180deg, rgba(8,13,22,.96), rgba(8,13,22,.85));
+  border-bottom:1px solid var(--border); backdrop-filter:blur(6px);
+  font-family:var(--mono); font-size:11px; color:var(--dim); letter-spacing:.04em;
+}
+.trace-strip .dot{width:6px; height:6px; border-radius:50%; background:var(--green); box-shadow:0 0 8px var(--green); flex-shrink:0;}
+.trace-strip.alert .dot{background:var(--red); box-shadow:0 0 8px var(--red);}
+.trace-strip canvas{flex:1; height:18px; max-width:340px;}
+.trace-strip .label{color:var(--muted); white-space:nowrap;}
+.trace-strip .spacer{flex:1;}
+
+/* ---------- progress rail ---------- */
+.rail{
+  position:fixed; left:22px; top:50%; transform:translateY(-50%); z-index:40;
+  display:flex; flex-direction:column; gap:9px;
+}
+.rail button{
+  all:unset; cursor:pointer; width:9px; height:9px; border-radius:50%;
+  background:var(--dim); transition:all .25s; position:relative;
+}
+.rail button:hover{background:var(--muted);}
+.rail button.active{background:var(--cyan); box-shadow:0 0 0 3px var(--cyan-dim); width:9px; height:22px; border-radius:5px;}
+.rail button .tip{
+  position:absolute; left:20px; top:50%; transform:translateY(-50%);
+  font-family:var(--mono); font-size:10.5px; color:var(--muted); white-space:nowrap;
+  opacity:0; transition:opacity .15s; pointer-events:none; background:var(--panel2);
+  padding:3px 8px; border-radius:5px; border:1px solid var(--border);
+}
+.rail button:hover .tip{opacity:1;}
+
+/* ---------- nav controls ---------- */
+.navctl{
+  position:fixed; right:26px; bottom:26px; z-index:40; display:flex; gap:8px; align-items:center;
+}
+.navctl button{
+  all:unset; cursor:pointer; width:42px; height:42px; border-radius:50%;
+  background:var(--panel2); border:1px solid var(--border); display:flex; align-items:center; justify-content:center;
+  color:var(--text); transition:all .2s;
+}
+.navctl button:hover{background:var(--raised); border-color:var(--border-strong);}
+.navctl button:disabled{opacity:.3; cursor:default;}
+.navctl .count{font-family:var(--mono); font-size:11px; color:var(--muted); padding:0 10px; min-width:52px; text-align:center;}
+.navctl .fs{width:36px; height:36px;}
+
+/* ---------- section frame ---------- */
+.deck{position:fixed; inset:0; z-index:1;}
+.screen{
+  position:absolute; inset:0; padding:78px 90px 60px 90px;
+  display:flex; flex-direction:column; justify-content:center;
+  opacity:0; pointer-events:none; transform:translateX(24px);
+  transition:opacity .38s ease, transform .38s ease;
+  overflow-y:auto;
+}
+.screen.active{opacity:1; pointer-events:auto; transform:translateX(0);}
+.screen.leaving{transform:translateX(-24px);}
+.eyebrow{
+  font-family:var(--mono); font-size:12px; color:var(--cyan); letter-spacing:.14em; text-transform:uppercase;
+  display:flex; align-items:center; gap:10px; margin-bottom:14px;
+}
+.eyebrow::before{content:''; width:22px; height:1px; background:var(--cyan);}
+h1.title{font-family:var(--disp); font-weight:700; font-size:clamp(30px,4vw,54px); line-height:1.05; letter-spacing:-.01em; margin-bottom:14px;}
+h2.sub{font-family:var(--body); font-weight:400; font-size:clamp(14px,1.3vw,18px); color:var(--muted); max-width:760px; line-height:1.55;}
+.section-num{position:absolute; top:78px; right:90px; font-family:var(--mono); font-size:12px; color:var(--dim);}
+
+/* ---------- generic components ---------- */
+.grid{display:grid; gap:16px;}
+.g4{grid-template-columns:repeat(4,1fr);}
+.g3{grid-template-columns:repeat(3,1fr);}
+.g2{grid-template-columns:repeat(2,1fr);}
+.card{
+  background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:20px;
+}
+.card:hover{border-color:var(--border-strong);}
+.kpi{padding:22px 20px;}
+.kpi .val{font-family:var(--disp); font-size:clamp(26px,2.6vw,38px); font-weight:700; color:var(--cyan);}
+.kpi .lbl{font-family:var(--mono); font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.06em; margin-top:6px;}
+.kpi .src{font-size:10.5px; color:var(--dim); margin-top:10px;}
+.pill{display:inline-flex; align-items:center; gap:6px; font-family:var(--mono); font-size:10.5px; padding:3px 9px; border-radius:20px; border:1px solid var(--border); color:var(--muted);}
+.pill.live{color:var(--green); border-color:rgba(62,196,141,.35); background:var(--green-dim);}
+.pill.demo{color:var(--amber); border-color:rgba(224,162,68,.35); background:var(--amber-dim);}
+
+/* flow diagram */
+.flow{display:flex; align-items:stretch; gap:0; flex-wrap:wrap;}
+.flow .node{
+  background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px 18px; min-width:150px; cursor:pointer; transition:all .2s; position:relative;
+}
+.flow .node:hover, .flow .node.on{border-color:var(--cyan); box-shadow:0 0 0 1px var(--cyan-dim), 0 0 24px rgba(78,198,210,.12); background:var(--panel2);}
+.flow .node .n{font-family:var(--mono); font-size:10px; color:var(--dim);}
+.flow .node .t{font-family:var(--disp); font-weight:600; font-size:14.5px; margin-top:4px;}
+.flow .arrow{display:flex; align-items:center; justify-content:center; width:34px; color:var(--dim); font-size:16px;}
+.flow.vertical{flex-direction:column; align-items:flex-start;}
+.flow.vertical .arrow{width:100%; height:22px; justify-content:flex-start; padding-left:22px;}
+/* mermaid diagram stage — overview fits without scrolling */
+.mm-stage{margin-top:14px; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:18px; overflow:hidden; height:46vh; min-height:300px; display:flex; align-items:center; justify-content:center;}
+.mm-wrap{width:100%; height:100%; display:flex; align-items:center; justify-content:center;}
+.mm-wrap.hidden{display:none;}
+.mm-wrap .mermaid{width:100%; height:100%; display:flex; align-items:center; justify-content:center;}
+.mm-wrap svg{width:auto !important; max-width:100% !important; height:auto !important; max-height:100% !important;}
+.mm-stage .edgeLabel, .mm-stage .edgeLabel *{font-family:var(--mono) !important; fill:var(--muted) !important; color:var(--muted) !important;}
+.mm-barline{display:flex; align-items:center; gap:14px; margin-top:10px;}
+.mm-barline .mm-caption{margin-top:0; flex:1;}
+
+/* clean attack-anatomy flow (slide 4) */
+.aflow{display:flex; align-items:stretch; gap:0; margin-top:26px;}
+.aflow .anode{flex:1 1 0; min-width:0; background:var(--panel); border:1px solid var(--border); border-radius:var(--radius); padding:14px 13px; cursor:pointer; transition:all .2s; display:flex; flex-direction:column; gap:7px; min-height:132px;}
+.aflow .anode:hover, .aflow .anode.on{border-color:var(--cyan); background:var(--panel2); box-shadow:0 0 0 1px var(--cyan-dim);}
+.aflow .anode .an{font-family:var(--mono); font-size:10px; color:var(--dim);}
+.aflow .anode .at{font-family:var(--disp); font-weight:600; font-size:13px; line-height:1.28; color:var(--text);}
+.aflow .anode .atag{margin-top:auto; align-self:flex-start; font-family:var(--mono); font-size:8.5px; letter-spacing:.04em; text-transform:uppercase; color:var(--cyan); border:1px solid rgba(78,198,210,.35); background:var(--cyan-dim); border-radius:20px; padding:3px 7px;}
+.aflow .aconn{flex:0 0 30px; align-self:center; position:relative; height:24px;}
+.aflow .aconn::before{content:''; position:absolute; left:3px; right:9px; top:50%; height:2px; background:var(--cyan); opacity:.55;}
+.aflow .aconn::after{content:''; position:absolute; right:4px; top:50%; transform:translateY(-50%); width:0; height:0; border-left:8px solid var(--cyan); border-top:5px solid transparent; border-bottom:5px solid transparent;}
+@media (max-width:980px){
+  .aflow{flex-direction:column;}
+  .aflow .anode{min-height:auto;}
+  .aflow .aconn{width:100%; height:24px; transform:rotate(90deg); margin:2px 0;}
+}
+
+/* architecture "expand" button + zoom/pan modal */
+.mm-expand{all:unset; cursor:pointer; font-family:var(--body); font-weight:600; font-size:12.5px; padding:9px 16px; border-radius:8px; background:var(--cyan-dim); color:var(--cyan); border:1px solid rgba(78,198,210,.4); display:inline-flex; align-items:center; gap:7px; white-space:nowrap; transition:all .18s;}
+.mm-expand:hover{background:rgba(78,198,210,.2);}
+.modal{position:fixed; inset:0; z-index:200; display:none; align-items:center; justify-content:center; background:rgba(4,8,14,.82); backdrop-filter:blur(5px);}
+.modal.open{display:flex;}
+.modal-inner{width:93vw; height:90vh; background:var(--panel); border:1px solid var(--border-strong); border-radius:14px; display:flex; flex-direction:column; overflow:hidden; box-shadow:0 30px 90px rgba(0,0,0,.55);}
+.modal-head{display:flex; align-items:center; gap:12px; padding:12px 16px; border-bottom:1px solid var(--border);}
+.modal-head .mt{font-family:var(--disp); font-weight:600; font-size:14.5px;}
+.modal-head .ms{font-family:var(--mono); font-size:11px; color:var(--dim);}
+.modal-head .spacer{flex:1;}
+.modal-ctrls{display:flex; align-items:center; gap:6px;}
+.modal-ctrls button{all:unset; cursor:pointer; min-width:34px; height:34px; padding:0 10px; border-radius:8px; background:var(--panel2); border:1px solid var(--border); color:var(--text); display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-size:13px; transition:all .16s;}
+.modal-ctrls button:hover{background:var(--raised); border-color:var(--border-strong);}
+.modal-ctrls .zpct{min-width:56px; color:var(--muted); pointer-events:none;}
+.modal-ctrls .mclose{background:var(--red-dim); border-color:rgba(232,93,98,.4); color:var(--red);}
+.modal-stage{flex:1; overflow:hidden; position:relative; cursor:grab;
+  background-image:radial-gradient(circle at 50% 40%, rgba(78,198,210,.05), transparent 60%), linear-gradient(rgba(128,150,185,.06) 1px, transparent 1px), linear-gradient(90deg, rgba(128,150,185,.06) 1px, transparent 1px);
+  background-size:100% 100%, 40px 40px, 40px 40px;}
+.modal-stage.grabbing{cursor:grabbing;}
+.modal-canvas{position:absolute; top:50%; left:50%; transform-origin:center center; will-change:transform;}
+.modal-canvas svg{width:auto !important; height:auto !important; max-width:none !important; max-height:none !important;}
+.modal-canvas .edgeLabel, .modal-canvas .edgeLabel *{font-family:var(--mono) !important; fill:var(--muted) !important; color:var(--muted) !important;}
+.modal-hint{position:absolute; left:14px; bottom:12px; font-family:var(--mono); font-size:10.5px; color:var(--dim); pointer-events:none;}
+
+/* slide 11 — results */
+.res-metrics{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:12px;}
+.res-mcol{background:var(--panel2); border:1px solid var(--border); border-radius:9px; padding:12px 14px;}
+.res-mcol h4{font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.06em; margin-bottom:8px;}
+.res-mcol.ifc h4{color:var(--amber);} .res-mcol.trc h4{color:var(--cyan);}
+.res-mrow{display:flex; justify-content:space-between; font-size:12.5px; padding:4px 0; border-bottom:1px solid var(--border);}
+.res-mrow:last-child{border-bottom:0;}
+.res-mrow .rk{color:var(--muted); font-family:var(--mono); font-size:10.5px;}
+.res-mrow .rv{color:var(--text); font-weight:600;}
+.atk-seg{display:flex; flex-wrap:wrap; gap:6px; margin-top:4px;}
+.atk-seg button{all:unset; cursor:pointer; font-family:var(--mono); font-size:11px; padding:6px 11px; border-radius:20px; border:1px solid var(--border); color:var(--muted); transition:all .16s;}
+.atk-seg button:hover{border-color:var(--border-strong); color:var(--text);}
+.atk-seg button.on{background:var(--cyan-dim); border-color:rgba(78,198,210,.4); color:var(--cyan);}
+.res-img{width:100%; border-radius:8px; border:1px solid var(--border); display:block;}
+table.res-table{width:100%; border-collapse:collapse; font-size:12px; margin-top:12px;}
+table.res-table th{font-family:var(--mono); font-size:10px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); text-align:right; padding:8px 10px; border-bottom:1px solid var(--border-strong);}
+table.res-table th:first-child{text-align:left;}
+table.res-table td{padding:8px 10px; border-bottom:1px solid var(--border); text-align:right; font-family:var(--mono);}
+table.res-table td:first-child{text-align:left; font-family:var(--body); color:var(--text);}
+table.res-table .g{color:var(--green);} table.res-table .d{color:var(--dim);}
+.mm-caption{font-family:var(--mono); font-size:11px; color:var(--dim); margin-top:10px;}
+.detail-box{
+  margin-top:16px; background:var(--panel2); border:1px solid var(--border); border-radius:var(--radius);
+  padding:16px 18px; font-size:13.5px; line-height:1.6; color:var(--text); min-height:70px;
+}
+.detail-box .k{font-family:var(--mono); font-size:10px; color:var(--cyan); text-transform:uppercase; letter-spacing:.06em; display:block; margin-bottom:5px;}
+.detail-box .placeholder{color:var(--dim); font-style:italic;}
+
+/* comparison table */
+table.cmp{width:100%; border-collapse:collapse; font-size:13.5px;}
+table.cmp th{text-align:left; font-family:var(--mono); font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); padding:10px 14px; border-bottom:1px solid var(--border-strong);}
+table.cmp td{padding:12px 14px; border-bottom:1px solid var(--border);}
+table.cmp tr td:first-child{color:var(--amber);}
+table.cmp tr td:last-child{color:var(--green);}
+
+/* buttons */
+.btn{
+  all:unset; cursor:pointer; font-family:var(--body); font-weight:600; font-size:13.5px;
+  padding:11px 20px; border-radius:8px; background:var(--cyan); color:#04141C; transition:all .18s;
+  display:inline-flex; align-items:center; gap:8px;
+}
+.btn:hover{filter:brightness(1.1); transform:translateY(-1px);}
+.btn.ghost{background:transparent; border:1px solid var(--border-strong); color:var(--text);}
+.btn.ghost:hover{background:var(--panel2);}
+.btn.danger{background:var(--red); color:#2A0708;}
+.seg{display:flex; gap:6px; background:var(--panel); border:1px solid var(--border); border-radius:9px; padding:4px;}
+.seg button{all:unset; cursor:pointer; padding:8px 16px; border-radius:6px; font-size:12.5px; font-family:var(--mono); color:var(--muted);}
+.seg button.on{background:var(--cyan-dim); color:var(--cyan);}
+
+/* dashboard */
+.dash-top{display:flex; justify-content:space-between; align-items:center; margin-bottom:14px;}
+.alert-row{display:flex; justify-content:space-between; align-items:center; padding:10px 14px; border-radius:8px; background:var(--panel2); border:1px solid var(--border); font-size:12.5px; margin-bottom:8px; cursor:pointer;}
+.alert-row:hover{border-color:var(--border-strong);}
+.alert-row .t{font-family:var(--mono); color:var(--dim); margin-right:10px;}
+.sev{width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:8px;}
+.sev.high{background:var(--red);} .sev.med{background:var(--amber);} .sev.low{background:var(--green);}
+.threat-badge{font-family:var(--disp); font-weight:700; font-size:22px; padding:8px 18px; border-radius:9px;}
+.threat-badge.low{color:var(--green); background:var(--green-dim); border:1px solid rgba(62,196,141,.35);}
+.threat-badge.medium{color:var(--amber); background:var(--amber-dim); border:1px solid rgba(224,162,68,.35);}
+.threat-badge.high{color:var(--red); background:var(--red-dim); border:1px solid rgba(232,93,98,.35);}
+.slider-wrap{display:flex; align-items:center; gap:14px; font-family:var(--mono); font-size:11px; color:var(--muted);}
+input[type=range]{flex:1; accent-color:var(--cyan);}
+
+/* feature cards */
+.feat{padding:16px; cursor:pointer;}
+.feat.on{border-color:var(--cyan); background:var(--panel2);}
+.feat .icon{color:var(--cyan); font-size:18px;}
+.feat .t{font-weight:600; font-size:13.5px; margin-top:8px;}
+.feat .d{font-size:11.5px; color:var(--muted); margin-top:4px; line-height:1.4;}
+
+/* sources */
+.src-list{display:flex; flex-direction:column; gap:0;}
+.src-item{display:flex; gap:14px; padding:14px 0; border-bottom:1px solid var(--border);}
+.src-item .idx{font-family:var(--mono); color:var(--cyan); font-size:12px; width:26px; flex-shrink:0;}
+.src-item .body b{font-size:13.5px;} .src-item .body .meta{font-size:11.5px; color:var(--muted); margin-top:2px;}
+
+.footer-hint{position:fixed; bottom:26px; left:90px; font-family:var(--mono); font-size:10.5px; color:var(--dim); z-index:5;}
+.chartwrap{position:relative; height:220px;}
+.two-col{display:grid; grid-template-columns:1.1fr .9fr; gap:22px; align-items:start;}
+.chip-row{display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;}
+.scroll-note{font-size:11px; color:var(--dim); font-family:var(--mono); margin-top:8px;}
+::-webkit-scrollbar{width:8px;} ::-webkit-scrollbar-thumb{background:var(--panel2); border-radius:4px;}
+
+/* incident cards */
+.incident{padding:18px; display:flex; flex-direction:column; gap:8px;}
+.incident .amt{font-family:var(--disp); font-size:26px; font-weight:700; color:var(--red);}
+.incident .row{display:flex; gap:8px; font-size:12px;}
+.incident .row .k{color:var(--dim); width:56px; flex-shrink:0; font-family:var(--mono); font-size:10.5px; text-transform:uppercase; padding-top:2px;}
+.incident .row .v{color:var(--text); line-height:1.5;}
+
+@media (max-width: 980px){
+  .screen{padding:70px 26px 90px 26px;}
+  .g4{grid-template-columns:repeat(2,1fr);}
+  .g3{grid-template-columns:repeat(2,1fr);}
+  .g2{grid-template-columns:1fr;}
+  .two-col{grid-template-columns:1fr;}
+  .rail{display:none;}
+  .flow{flex-direction:column; align-items:flex-start;}
+  .flow .arrow{width:100%; height:22px; padding-left:22px; transform:rotate(90deg); justify-content:flex-start;}
+}
+</style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+
+<div class="trace-strip" id="traceStrip">
+  <span class="dot" id="traceDot"></span>
+  <span class="label" id="traceLabel">SESSION MONITOR — nominal</span>
+  <canvas id="traceCanvas" width="340" height="18"></canvas>
+  <span class="spacer"></span>
+  <span class="label" id="clockLabel">security-copilot // presentation build</span>
+</div>
+
+<div class="rail" id="rail"></div>
+
+<div class="navctl">
+  <button id="prevBtn" title="Previous (←)">‹</button>
+  <span class="count" id="countLabel">01 / 14</span>
+  <button id="nextBtn" title="Next (→)">›</button>
+  <button class="fs" id="fsBtn" title="Fullscreen (F)">⛶</button>
+</div>
+
+<div class="footer-hint">← → to navigate · F fullscreen</div>
+
+<div class="deck" id="deck"></div>
+
+<!-- architecture zoom/pan modal -->
+<div class="modal" id="archModal">
+  <div class="modal-inner">
+    <div class="modal-head">
+      <span class="mt" id="archModalTitle">Complete architecture</span>
+      <span class="ms" id="archModalSub">README § Architecture</span>
+      <span class="spacer"></span>
+      <div class="modal-ctrls">
+        <button id="mzOut" title="Zoom out">−</button>
+        <button class="zpct" id="mzPct">100%</button>
+        <button id="mzIn" title="Zoom in">+</button>
+        <button id="mzReset" title="Reset view">Reset</button>
+        <button class="mclose" id="mzClose" title="Close (Esc)">✕</button>
+      </div>
+    </div>
+    <div class="modal-stage" id="archModalStage">
+      <div class="modal-canvas" id="archModalCanvas"></div>
+      <div class="modal-hint">Drag to pan · scroll to zoom · Esc to close</div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* =========================================================
+   CONTENT + STATE
+   ========================================================= */
+const SECTIONS = [
+  {id:'opening', label:'Opening'},
+  {id:'problem', label:'The Problem'},
+  {id:'incidents', label:'Real-World Incidents'},
+  {id:'attack', label:'Attack Anatomy'},
+  {id:'difficulty', label:'Why Detection Is Hard'},
+  {id:'architecture', label:'Our Approach'},
+  {id:'features', label:'Signals & Features'},
+  {id:'anomaly', label:'Anomaly Detection'},
+  {id:'dashboard', label:'Live Dashboard'},
+  {id:'results', label:'Detection Results'},
+  {id:'business', label:'Business Impact'},
+  {id:'limitations', label:'Limitations & Roadmap'},
+  {id:'close', label:'Takeaway'},
+];
+
+let current = 0;
+
+/* rail + counter */
+const rail = document.getElementById('rail');
+SECTIONS.forEach((s,i)=>{
+  const b = document.createElement('button');
+  b.innerHTML = `<span class="tip">${String(i+1).padStart(2,'0')} — ${s.label}</span>`;
+  b.addEventListener('click', ()=>goTo(i));
+  rail.appendChild(b);
+});
+
+function updateRail(){
+  [...rail.children].forEach((b,i)=>b.classList.toggle('active', i===current));
+  document.getElementById('countLabel').textContent = `${String(current+1).padStart(2,'0')} / ${SECTIONS.length}`;
+  document.getElementById('prevBtn').disabled = current===0;
+  document.getElementById('nextBtn').disabled = current===SECTIONS.length-1;
+}
+
+function goTo(i){
+  if(i<0 || i>=SECTIONS.length || i===current) return;
+  const screens = document.querySelectorAll('.screen');
+  screens[current].classList.remove('active');
+  screens[current].classList.add('leaving');
+  screens[i].classList.remove('leaving');
+  requestAnimationFrame(()=> screens[i].classList.add('active'));
+  setTimeout(()=> screens[current].classList.remove('leaving'), 400);
+  current = i;
+  updateRail();
+  setTraceState(SECTIONS[i].id);
+}
+
+document.getElementById('prevBtn').addEventListener('click', ()=>goTo(current-1));
+document.getElementById('nextBtn').addEventListener('click', ()=>goTo(current+1));
+document.addEventListener('keydown', e=>{
+  if(document.getElementById('archModal').classList.contains('open')){
+    if(e.key==='Escape') closeArchModal();
+    return; // modal captures navigation keys
+  }
+  if(e.key==='ArrowRight' || e.key===' ') { e.preventDefault(); goTo(current+1); }
+  if(e.key==='ArrowLeft') goTo(current-1);
+  if(e.key.toLowerCase()==='f') toggleFullscreen();
+});
+document.getElementById('fsBtn').addEventListener('click', toggleFullscreen);
+function toggleFullscreen(){
+  if(!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
+  else document.exitFullscreen();
+}
+
+/* trace strip sparkline — signature ambient element */
+const traceCanvas = document.getElementById('traceCanvas');
+const tctx = traceCanvas.getContext('2d');
+let traceData = Array.from({length:60}, ()=> 3+Math.random()*4);
+function setTraceState(id){
+  document.getElementById('traceStrip').classList.toggle('alert', false);
+  document.getElementById('traceLabel').textContent =
+    id==='dashboard' ? 'SESSION MONITOR — live demo feed' :
+    'SESSION MONITOR — nominal';
+}
+function drawTrace(){
+  traceData.shift();
+  traceData.push(3+Math.random()*4);
+  tctx.clearRect(0,0,340,18);
+  tctx.beginPath();
+  traceData.forEach((v,i)=>{
+    const x = i*(340/59), y = 18-v;
+    i===0 ? tctx.moveTo(x,y) : tctx.lineTo(x,y);
+  });
+  tctx.strokeStyle = '#4EC6D2';
+  tctx.lineWidth = 1.4;
+  tctx.stroke();
+  requestAnimationFrame(drawTrace);
+}
+drawTrace();
+document.getElementById('clockLabel').textContent = 'security-copilot // ' + new Date().toISOString().slice(0,10);
+
+/* =========================================================
+   BUILD SCREENS (HTML strings, injected once)
+   ========================================================= */
+const deck = document.getElementById('deck');
+
+function screenWrap(i, html){
+  const el = document.createElement('section');
+  el.className = 'screen' + (i===0 ? ' active' : '');
+  el.dataset.id = SECTIONS[i].id;
+  el.innerHTML = `<div class="section-num">${String(i+1).padStart(2,'0')} / ${SECTIONS.length}</div>` + html;
+  deck.appendChild(el);
+}
+
+/* ---------- 1. OPENING ---------- */
+screenWrap(0, `
+  <div class="eyebrow">Security-Copilot · Applied Cybersecurity Prototype</div>
+  <h1 class="title">Phishing &amp; Anomaly<br>Detection</h1>
+  <h2 class="sub">A personal security assistant that investigates suspicious links and emails with a
+  tool-using LLM agent, and watches this machine's own network behaviour for what a signature can't catch.
+  One agent, two detection surfaces, one explained verdict.</h2>
+  <div style="margin-top:34px; padding:16px 20px; border-left:2px solid var(--cyan); background:var(--panel);
+       max-width:640px; font-family:var(--disp); font-size:16px; line-height:1.5;">
+    "Detect suspicious behaviour before a phishing incident becomes a financial or operational loss."
+  </div>
+  <div class="chip-row">
+    <span class="pill">LangGraph agent · 4 investigation tools</span>
+    <span class="pill">Isolation Forest + TranAD</span>
+    <span class="pill">MITRE ATT&CK mapping</span>
+    <span class="pill">Chrome extension · Web UI · CLI</span>
+  </div>
+`);
+
+/* ---------- 2. THE PROBLEM ---------- */
+screenWrap(1, `
+  <div class="eyebrow">01 · The Problem</div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">Phishing is still the single largest
+  reported cybercrime</h1>
+  <div class="grid g4" style="margin-top:22px;">
+    <div class="card kpi"><div class="val">$16.6B</div><div class="lbl">Total reported cybercrime losses, 2024</div><div class="src">FBI IC3 2024 Internet Crime Report</div></div>
+    <div class="card kpi"><div class="val">193,407</div><div class="lbl">Phishing / spoofing complaints — the #1 category</div><div class="src">FBI IC3 2024 Internet Crime Report</div></div>
+    <div class="card kpi"><div class="val">+33%</div><div class="lbl">Year-over-year rise in total losses</div><div class="src">FBI IC3 2024 Internet Crime Report</div></div>
+    <div class="card kpi"><div class="val">$2.7B</div><div class="lbl">Losses from business email compromise alone</div><div class="src">FBI IC3 2024 Internet Crime Report</div></div>
+  </div>
+  <div class="two-col" style="margin-top:26px;">
+    <div class="card">
+      <div class="chartwrap"><canvas id="problemChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px;">Why signatures fall behind</div>
+      <p style="font-size:13.5px; line-height:1.7; color:var(--text);">
+      Phishing complaints outnumber the next-largest category (extortion) by more than 2×, and the average
+      reported loss per incident reached $19,372 in 2024. Kits are cloned in minutes, domains rotate faster than
+      blocklists update, and a well-crafted message rarely trips a static filter. The gap isn't detection
+      volume — it's catching the campaigns nobody has seen yet.</p>
+      <div class="chip-row"><span class="pill">Source: ic3.gov, 2024 Internet Crime Report (PDF)</span></div>
+    </div>
+  </div>
+`);
+
+/* ---------- 3. INCIDENTS ---------- */
+screenWrap(2, `
+  <div class="eyebrow">02 · Real-World Incidents</div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">When phishing reaches production systems</h1>
+  <div class="grid g3" style="margin-top:22px;">
+    <div class="card incident">
+      <div class="amt">£47M ($63.8M)</div>
+      <div class="row"><span class="k">Target</span><span class="v">UK tax authority (HMRC) customer accounts</span></div>
+      <div class="row"><span class="k">Method</span><span class="v">Organised group used phishing to access 100,000+ taxpayer accounts and falsely claim government payments</span></div>
+      <div class="row"><span class="k">Lesson</span><span class="v">Bulk credential harvesting at scale — no individual login "looked" malicious in isolation</span></div>
+      <span class="pill" style="align-self:flex-start;">Reuters, June 2026</span>
+    </div>
+    <div class="card incident">
+      <div class="amt">$100M+</div>
+      <div class="row"><span class="k">Target</span><span class="v">Employees at two major technology companies (Google, Facebook)</span></div>
+      <div class="row"><span class="k">Method</span><span class="v">Fraudulent invoicing / business-email-compromise scheme convinced staff to wire funds to attacker-controlled accounts</span></div>
+      <div class="row"><span class="k">Lesson</span><span class="v">The email itself looked routine — the anomaly was in the payment behaviour, not the message</span></div>
+      <span class="pill">Reuters / Fortune reporting</span>
+    </div>
+    <div class="card incident">
+      <div class="amt">€5M ($5.9M)</div>
+      <div class="row"><span class="k">Target</span><span class="v">Ireland's National Treasury Management Agency</span></div>
+      <div class="row"><span class="k">Method</span><span class="v">Phishing attack led the sovereign debt office to review its security protocols after the loss</span></div>
+      <div class="row"><span class="k">Lesson</span><span class="v">Even institutions managing sovereign funds are one convincing message away from loss</span></div>
+      <span class="pill">Reuters, July 2026</span>
+    </div>
+  </div>
+  <p class="scroll-note" style="margin-top:16px;">Incidents summarised from the Reuters and HMRC coverage supplied
+  for this project. Figures are as reported at time of publication.</p>
+`);
+
+/* ---------- 4. ATTACK ANATOMY ---------- */
+screenWrap(3, `
+  <div class="eyebrow">03 · Attack Anatomy</div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">How a phishing attack actually unfolds</h1>
+  <h2 class="sub">A single left-to-right timeline. Click any stage to see what's really happening — and the
+  two points where our detection surfaces intervene.</h2>
+  <div class="aflow" id="attackFlow"></div>
+  <div class="detail-box" id="attackDetail">Select a stage above.</div>
+`);
+
+/* ---------- 5. WHY DETECTION IS HARD ---------- */
+screenWrap(4, `
+  <div class="eyebrow">04 · The Core Challenge</div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">Rule-based detection can't see what it
+  hasn't been told to look for</h1>
+  <div class="two-col" style="margin-top:24px;">
+    <div class="card">
+      <table class="cmp">
+        <tr><th>Rule-based detection</th><th>Behaviour / anomaly-based detection</th></tr>
+        <tr><td>Matches known indicators (blocklists, signatures)</td><td>Learns a baseline of normal behaviour</td></tr>
+        <tr><td>Static rules, manually authored</td><td>Statistical deviation from that baseline</td></tr>
+        <tr><td>Fast, but evaded by any novel domain or kit</td><td>Can flag behaviour nobody has labelled yet</td></tr>
+        <tr><td>Zero context on *why* something is unusual</td><td>Produces a score the agent can reason about</td></tr>
+      </table>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px;">Our position</div>
+      <p style="font-size:13.5px; line-height:1.7;">Security-Copilot doesn't pick one side. A router node
+      applies a fast blocklist + 24-hour cache check first — the rule-based fast path — and only escalates to
+      the reasoning agent and the unsupervised network models when a case is genuinely ambiguous. Cheap checks
+      run first; expensive, context-aware ones run when it matters.</p>
+      <div class="chip-row"><span class="pill">Router: blocklist + cache</span><span class="pill">Agent: adaptive investigation</span><span class="pill">Network: unsupervised models</span></div>
+    </div>
+  </div>
+`);
+
+/* ---------- 6. ARCHITECTURE ---------- */
+screenWrap(5, `
+  <div class="eyebrow">05 · System Architecture <span class="pill" style="margin-left:8px;">Rendered from README Mermaid</span></div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">One agent, two detection pipelines</h1>
+  <h2 class="sub">The actual architecture diagrams from the project README — four views of the same system.
+  Switch views to trace input → processing → detection → decision → output.</h2>
+  <div class="seg" style="margin-top:16px;" id="archSeg">
+    <button data-d="0" class="on">Complete architecture</button>
+    <button data-d="1">Phishing flow</button>
+    <button data-d="2">Network anomaly</button>
+    <button data-d="3">Agent internals</button>
+  </div>
+  <div class="mm-stage" id="archMermaid"></div>
+  <div class="mm-barline">
+    <div class="mm-caption" id="archCaption">Diagram 1 of 4 · README § Architecture → Complete architecture</div>
+    <button class="mm-expand" id="archExpandBtn">⛶ View Full Diagram</button>
+  </div>
+`);
+
+/* ---------- 7. FEATURES ---------- */
+screenWrap(6, `
+  <div class="eyebrow">06 · Signals &amp; Features</div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">What the system actually looks at</h1>
+  <h2 class="sub">Only signals genuinely used by the two pillars — link/email investigation and network flow
+  scoring. Click a card to see where it enters the pipeline.</h2>
+  <div class="grid g4" id="featGrid" style="margin-top:22px;"></div>
+  <div class="detail-box" id="featDetail">Select a signal above.</div>
+`);
+
+/* ---------- 8. ANOMALY DETECTION ---------- */
+screenWrap(7, `
+  <div class="eyebrow">07 · Anomaly Detection</div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">Two unsupervised models, one escalation rule</h1>
+  <div class="two-col" style="margin-top:20px;">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:6px;">Normal vs. anomalous flow windows</div>
+      <div class="chartwrap" style="height:280px;"><canvas id="scatterChart"></canvas></div>
+      <div class="slider-wrap" style="margin-top:14px;">
+        <span>Risk threshold</span>
+        <input type="range" id="threshSlider" min="50" max="99" value="85">
+        <span id="threshVal">85th pct.</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:6px;">Isolation Forest</div>
+      <p style="font-size:13px; line-height:1.6;">Scores a single 60-second flow window against a persisted
+      percentile threshold — fast, and effective against connections that already look wrong on their own.</p>
+      <div class="eyebrow" style="margin:14px 0 6px;">TranAD</div>
+      <p style="font-size:13px; line-height:1.6;">A transformer scoring the <i>sequence</i> of windows —
+      catches beaconing and slow exfiltration where any single window looks unremarkable. Verified against a
+      synthetic slow-exfiltration/beaconing sequence that Isolation Forest alone missed, with no false positives
+      on normal traffic.</p>
+      <div class="detail-box" style="margin-top:14px;">
+        <span class="k">Escalation rule</span>
+        A flow window is escalated and mapped to the nearest MITRE ATT&CK technique (via SecureBERT embeddings)
+        if <b>either</b> model flags it.
+      </div>
+    </div>
+  </div>
+`);
+
+/* ---------- 9. LIVE DASHBOARD ---------- */
+screenWrap(8, `
+  <div class="eyebrow">08 · Live Security Dashboard <span class="pill demo" style="margin-left:8px;">Demo data</span></div>
+  <div class="dash-top">
+    <h1 class="title" style="font-size:clamp(22px,2.4vw,30px); margin-bottom:0;">Operational view</h1>
+    <div class="threat-badge low" id="threatBadge">LOW</div>
+  </div>
+  <div class="grid g4" style="margin-top:6px;">
+    <div class="card kpi"><div class="val" id="kEvents">12,483</div><div class="lbl">Events analysed</div></div>
+    <div class="card kpi"><div class="val" id="kAnom">137</div><div class="lbl">Anomalies detected</div></div>
+    <div class="card kpi"><div class="val" id="kCrit">4</div><div class="lbl">Critical alerts</div></div>
+    <div class="card kpi"><div class="val" id="kRate">94.7%</div><div class="lbl">Windows within baseline</div></div>
+  </div>
+  <div class="two-col" style="margin-top:16px;">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:6px;">Activity timeline</div>
+      <div class="chartwrap" style="height:190px;"><canvas id="timelineChart"></canvas></div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px;">Recent alerts</div>
+      <div id="alertFeed"></div>
+    </div>
+  </div>
+  <div class="detail-box" id="alertDetail" style="display:none; margin-top:10px;"></div>
+`);
+
+/* ---------- 10. RESULTS (real evaluation data) ---------- */
+screenWrap(9, `
+  <div class="eyebrow">09 · Detection Results <span class="pill live" style="margin-left:8px;">Project data</span></div>
+  <h1 class="title" style="font-size:clamp(22px,2.4vw,30px); margin-bottom:8px;">What the network models actually detect</h1>
+  <h2 class="sub" style="max-width:1000px; font-size:13.5px;">Isolation Forest (per-flow) and TranAD (temporal, 60s windows), trained on real
+  <b>CICIDS2017</b> Monday benign traffic (~530k flows / 487 windows) and evaluated against six labeled attack days.
+  Production escalation thresholds: IF P99&nbsp;=&nbsp;0.6224, TranAD P99&nbsp;=&nbsp;0.1302 — both reproduced from scratch after the last merge.</h2>
+  <div class="grid g4" style="margin-top:16px;">
+    <div class="card kpi"><div class="val" style="color:var(--green);">88.4%</div><div class="lbl">TranAD F1 · DDoS (P99)</div><div class="src">Best single result — full sweep below</div></div>
+    <div class="card kpi"><div class="val">5 / 6</div><div class="lbl">Attack types covered well by ≥1 model</div><div class="src">Evaluation verdict</div></div>
+    <div class="card kpi"><div class="val">~530k</div><div class="lbl">Benign flows in the training baseline</div><div class="src">CICIDS2017 Monday</div></div>
+    <div class="card kpi"><div class="val">6</div><div class="lbl">Labeled attack days evaluated</div><div class="src">CICIDS2017 Tue–Fri</div></div>
+  </div>
+  <div class="two-col" style="margin-top:16px;">
+    <div class="card">
+      <div class="seg" id="resSeg" style="margin-bottom:12px;">
+        <button data-v="bars" class="on">Per-attack F1 (P99)</button>
+        <button data-v="sweep">DDoS threshold sweep</button>
+      </div>
+      <div id="resView-bars">
+        <div class="chartwrap" style="height:230px;"><canvas id="resF1Chart"></canvas></div>
+        <div class="scroll-note">F1 at each model's shipped threshold (P99). IF scores per-flow; TranAD scores per-60s-window.</div>
+      </div>
+      <div id="resView-sweep" style="display:none;">
+        <img class="res-img" src="artifact-2.png" alt="Threshold sweep on DDoS — Isolation Forest vs TranAD, precision/recall/F1 across percentiles P50–P99">
+        <div class="scroll-note">Precision / recall / F1 vs escalation percentile. Chart from the project's evaluation report.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:8px;">Inspect an attack type</div>
+      <div class="atk-seg" id="atkSeg"></div>
+      <div class="res-metrics" id="atkMetrics"></div>
+      <div class="detail-box" id="atkNote" style="margin-top:12px; min-height:auto;"></div>
+    </div>
+  </div>
+  <div style="margin-top:12px; display:flex; align-items:center; gap:14px;">
+    <button class="btn ghost" id="resTableBtn" style="font-size:12.5px; padding:8px 14px;">Show full metrics table</button>
+    <span class="scroll-note" style="margin:0;">Source: “Network anomaly models — full evaluation report” (CICIDS2017, held-out Monday-benign calibration).</span>
+  </div>
+  <div id="resTableWrap" style="display:none; margin-top:6px;"></div>
+`);
+
+/* ---------- 11. BUSINESS IMPACT ---------- */
+screenWrap(10, `
+  <div class="eyebrow">10 · Business Impact</div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">From technical signal to business outcome</h1>
+  <div class="two-col" style="margin-top:22px;">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px; color:var(--red);">Before</div>
+      <div class="flow vertical">
+        <div class="node"><div class="t">Attack occurs</div></div>
+        <div class="arrow">↓</div>
+        <div class="node"><div class="t">Detection delay</div></div>
+        <div class="arrow">↓</div>
+        <div class="node"><div class="t">Financial / operational impact</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px; color:var(--green);">With Security-Copilot</div>
+      <div class="flow vertical">
+        <div class="node"><div class="t">Behaviour monitoring (link, email, network)</div></div>
+        <div class="arrow">↓</div>
+        <div class="node"><div class="t">Early anomaly detection + agent investigation</div></div>
+        <div class="arrow">↓</div>
+        <div class="node"><div class="t">Explained alert + one-click block/report</div></div>
+      </div>
+    </div>
+  </div>
+  <p style="margin-top:18px; font-size:13px; color:var(--muted); max-width:760px; line-height:1.7;">
+  The goal is earlier, better-explained intervention — not a claim of eliminating phishing outright. Reduced
+  investigation time (cached/blocklisted cases resolve instantly), earlier visibility into network-level
+  compromise, and a plain-English reason a non-specialist can act on are the outcomes this architecture is
+  built for.</p>
+`);
+
+/* ---------- 12. LIMITATIONS ---------- */
+screenWrap(11, `
+  <div class="eyebrow">11 · Limitations &amp; Roadmap</div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">What this is — and isn't — today</h1>
+  <div class="two-col" style="margin-top:20px;">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px; color:var(--amber);">Current limitations</div>
+      <ul style="padding-left:18px; font-size:13px; line-height:2; color:var(--text);">
+        <li>Network models trained on public datasets (CICIDS2017 / NSL-KDD), not this machine's own traffic</li>
+        <li>No packet-content inspection — connection metadata only, by design</li>
+        <li>Proof-of-concept scope: no auth layer, single-machine network monitoring only</li>
+        <li>Brute-force detection is still an open gap for both models (see Detection Results)</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px; color:var(--cyan);">Planned / deferred by design</div>
+      <ul style="padding-left:18px; font-size:13px; line-height:2; color:var(--text);">
+        <li><b>Per-user personalization</b> — periodic retraining on this machine's own logged traffic (excluding
+        confirmed-malicious flows), deferred until the helper has weeks of logged history</li>
+        <li>SIEM / enterprise integration</li>
+        <li>Whole-home-network monitoring (needs router-level infrastructure — explicitly out of scope)</li>
+        <li>Automatic per-link badging via a content script (currently click-triggered by design)</li>
+      </ul>
+    </div>
+  </div>
+`);
+
+/* ---------- 13. CLOSE ---------- */
+screenWrap(12, `
+  <div class="eyebrow">Final Takeaway</div>
+  <h1 class="title">The goal isn't just to<br>detect phishing.</h1>
+  <h2 class="sub" style="max-width:640px;">It's to identify abnormal behaviour early enough to reduce its
+  impact — and to explain that judgement in plain language a person can act on.</h2>
+  <div class="flow" style="margin-top:32px;">
+    <div class="node"><div class="n">01</div><div class="t">Detect</div></div><div class="arrow">→</div>
+    <div class="node"><div class="n">02</div><div class="t">Analyse</div></div><div class="arrow">→</div>
+    <div class="node"><div class="n">03</div><div class="t">Score</div></div><div class="arrow">→</div>
+    <div class="node"><div class="n">04</div><div class="t">Alert</div></div><div class="arrow">→</div>
+    <div class="node"><div class="n">05</div><div class="t">Respond</div></div>
+  </div>
+  <div style="margin-top:40px;">
+    <div style="font-family:var(--disp); font-size:28px; font-weight:700;">Thank you.</div>
+    <div style="color:var(--muted); margin-top:6px;">Questions?</div>
+  </div>
+`);
+
+/* =========================================================
+   INTERACTIVE WIRING PER SCREEN
+   ========================================================= */
+
+/* ---- Attack anatomy flow (clean straight-line) ---- */
+const attackStages = [
+  {short:'Attacker', t:'Attacker', d:'A threat actor crafts a message or clones a login page, often impersonating a known brand or internal contact.'},
+  {short:'Phishing message', t:'Phishing email / message', tag:'Detection ①', d:'Delivered via email, SMS, or a malicious link. Security-Copilot\'s extension gives an instant local read (ONNX/BERT) on the page or message the moment it\'s opened — no click required.'},
+  {short:'Victim clicks', t:'Victim', d:'A person clicks the link or opens the attachment, usually because the message matches a familiar pattern or urgency cue.'},
+  {short:'Credential capture', t:'Credential capture / malicious link', d:'A cloned page harvests credentials, or a payload runs. On escalation, the agent inspects the page in a headless-Chromium sandbox and checks WHOIS/VirusTotal and DOM asset-hotlinking for a cloned-kit fingerprint.'},
+  {short:'Account compromise', t:'Account compromise', d:'Stolen credentials are reused, often from infrastructure that looks nothing like the original login.'},
+  {short:'Abnormal network activity', t:'Abnormal activity', tag:'Detection ②', d:'Outbound connection patterns shift. The network pillar aggregates connection metadata into 60-second windows and scores them with Isolation Forest and TranAD — independently of anything the phishing check saw.'},
+  {short:'Financial / operational loss', t:'Financial / operational damage', d:'Without early intervention, this is where incidents like the ones on the previous screen land — funds moved, accounts drained, response teams paged after the fact.'},
+];
+buildAttackFlow('attackFlow','attackDetail', attackStages);
+
+/* ---- Architecture: render the actual README Mermaid diagrams ---- */
+const archDiagrams = [
+`flowchart TB
+    subgraph Clients["Entry points"]
+        EXT["Chrome Extension<br/>automatic per-page scan, popup,<br/>blocked-page interstitial"]
+        DASH["Dashboard (Next.js)<br/>history, live scans, PDF reports"]
+        CLI["cli.py<br/>(terminal)"]
+    end
+    HOST["native-host/host.py<br/>network flow collector"]
+    EXT -->|"check / quick-check / report"| API
+    DASH -->|"check / GET runs"| API
+    CLI --> GRAPH
+    HOST -->|"POST /report-flow<br/>+ nearest MITRE technique"| API
+    API["FastAPI<br/>(backend/api/)"] --> GRAPH["LangGraph agent<br/>router → agent → tools → output"]
+    GRAPH --> TOOLS["5 tools: inspect_website, domain_reputation,<br/>content_classifier, web_search, recall_similar_cases"]
+    GRAPH --> STORE[("history.db + markdown/PDF reports<br/>+ case-memory embeddings<br/>+ static blocklist")]
+    GRAPH --> VERDICT["Verdict<br/>label, confidence, reason, alternatives"]
+    VERDICT --> EXT
+    VERDICT --> DASH
+    VERDICT --> CLI
+    HOST --> NET["Isolation Forest + TranAD"]`,
+`flowchart TD
+    subgraph Automatic["Automatic — no click needed"]
+        NAV(["Every http(s) navigation"]) --> QCU["quick-check-url<br/>ONNX model + cached VirusTotal"]
+        OPEN(["Popup opened on a<br/>recognized webmail tab"]) --> QCE["quick-check-email<br/>BERT text model"]
+        QCU --> BANNER["Banner / popup result<br/>quiet toast if safe,<br/>persistent banner if not"]
+        QCE --> BANNER
+    end
+    subgraph Deliberate["Deliberate investigation"]
+        INPUT(["A URL or email —<br/>dashboard, CLI, or the<br/>banner's escalation button"]) --> ROUTER{"Blocklist or<br/>24h cache hit?"}
+        BANNER -.->|"Full report /<br/>Run full scan"| INPUT
+        ROUTER -->|"yes"| INSTANT["Verdict returned instantly,<br/>no agent run"]
+        ROUTER -->|"no"| AGENT["Full LangGraph agent"]
+        AGENT --> LINKS{"Email with<br/>links found?"}
+        LINKS -->|"yes"| MULTI["Every link investigated like<br/>its own URL case<br/>(deduped to 1/domain, capped)"]
+        LINKS -->|"no"| SINGLE["The single URL investigated"]
+        MULTI --> VERDICT["Verdict + reason +<br/>legitimate alternatives"]
+        SINGLE --> VERDICT
+    end
+    VERDICT --> HISTORY[("history.db, report,<br/>case-memory index")]`,
+`flowchart LR
+    PSUTIL["psutil.net_connections<br/>polled every ~2s"] --> COLLECT["flow_collector.py<br/>diff snapshots, aggregate<br/>metadata only, never payloads"]
+    COLLECT --> WINDOW["60-second feature-vector window"]
+    WINDOW --> IF["Isolation Forest<br/>single window"]
+    WINDOW --> TRANAD["TranAD<br/>temporal sequence —<br/>beaconing, slow exfiltration"]
+    IF --> ESCALATE{"Either model<br/>flags it?"}
+    TRANAD --> ESCALATE
+    ESCALATE -->|"no"| DONE(["Nothing reported"])
+    ESCALATE -->|"yes"| MITRE["mitre/lookup.py<br/>nearest MITRE ATT&CK technique<br/>SecureBERT embeddings"]
+    MITRE --> REPORT["POST /report-flow"]
+    REPORT --> AGENT["Same LangGraph agent<br/>as a link/email case"]
+    AGENT --> VERDICT["Verdict + remediation<br/>curated playbook preferred<br/>over raw STIX text"]`,
+`flowchart TD
+    ENTRY(["case_type: link / email / network_flow"]) --> ROUTER["router_node<br/>link only: blocklist + 24h cache"]
+    ROUTER -->|"cache/blocklist hit"| OUTPUT
+    ROUTER -->|"unresolved"| AGENTNODE
+    AGENTNODE["agent_node<br/>LLM decides the next tool call,<br/>or that it's done"] -->|"tool call(s)"| TOOLNODE
+    TOOLNODE["ToolNode"] -->|"result"| AGENTNODE
+    AGENTNODE -->|"no tool calls —<br/>final answer"| OUTPUT
+    TOOLNODE -.-> T1["inspect_website<br/>headless Chromium: screenshot,<br/>forms, DOM assets, deployment IP"]
+    TOOLNODE -.-> T2["domain_reputation<br/>WHOIS + VirusTotal"]
+    TOOLNODE -.-> T3["content_classifier<br/>ONNX URL model / BERT text model"]
+    TOOLNODE -.-> T4["web_search<br/>DuckDuckGo, keyless"]
+    TOOLNODE -.-> T5["recall_similar_cases<br/>SecureBERT similarity over<br/>past investigations"]
+    OUTPUT["output_node<br/>parse VERDICT / CONFIDENCE / REASON / ALTERNATIVES<br/>write router cache + case-memory index"]
+    OUTPUT --> VERDICT(["Verdict"])
+    AGENTNODE -.->|"recursion limit hit"| FAILSAFE1(["Inconclusive verdict<br/>suspicious, 0.3 confidence"])
+    AGENTNODE -.->|"OpenRouter rate-limited<br/>or account error"| FAILSAFE2(["Fails safe: suspicious,<br/>'try again' / 'service unavailable'"])`,
+];
+const archCaptions = [
+  'Diagram 1 of 4 · README § Architecture → Complete architecture',
+  'Diagram 2 of 4 · README § Architecture → Phishing detection flow',
+  'Diagram 3 of 4 · README § Architecture → Network anomaly detection',
+  'Diagram 4 of 4 · README § Architecture → LangGraph agent flow',
+];
+
+mermaid.initialize({
+  startOnLoad:false,
+  securityLevel:'loose',
+  theme:'base',
+  flowchart:{curve:'basis', htmlLabels:true, padding:14},
+  themeVariables:{
+    background:'#0F1622',
+    primaryColor:'#16202F', primaryBorderColor:'rgba(128,150,185,.45)', primaryTextColor:'#E8EDF5',
+    secondaryColor:'#1C2839', secondaryBorderColor:'rgba(128,150,185,.35)', secondaryTextColor:'#E8EDF5',
+    tertiaryColor:'#0F1622', tertiaryBorderColor:'rgba(128,150,185,.3)', tertiaryTextColor:'#E8EDF5',
+    lineColor:'#4EC6D2', edgeLabelBackground:'#0F1622',
+    clusterBkg:'rgba(78,198,210,.05)', clusterBorder:'rgba(78,198,210,.35)',
+    nodeBorder:'rgba(128,150,185,.45)', mainBkg:'#16202F',
+    fontFamily:'Inter, sans-serif', fontSize:'13px', titleColor:'#4EC6D2',
+    nodeTextColor:'#E8EDF5', labelBoxBkgColor:'#16202F',
+  }
+});
+
+const archStage = document.getElementById('archMermaid');
+const archCaption = document.getElementById('archCaption');
+async function renderArch(){
+  archStage.innerHTML = '';
+  const wraps = [];
+  for(let i=0;i<archDiagrams.length;i++){
+    const wrap = document.createElement('div');
+    wrap.className = 'mm-wrap';           // all visible during render (display:none breaks mermaid layout)
+    const g = document.createElement('div');
+    g.className = 'mermaid'; g.id = 'archmm-'+i;
+    g.textContent = archDiagrams[i];
+    wrap.appendChild(g);
+    archStage.appendChild(wrap);
+    wraps.push(wrap);
+  }
+  try { await mermaid.run({ querySelector:'#archMermaid .mermaid' }); } catch(e){}
+  wraps.forEach((w,i)=> w.classList.toggle('hidden', i!==0));   // hide non-active AFTER layout
+}
+renderArch();
+let archActive = 0;
+const archTitles = ['Complete architecture','Phishing detection flow','Network anomaly detection','LangGraph agent flow'];
+document.querySelectorAll('#archSeg button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('#archSeg button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    const d = +b.dataset.d;
+    archActive = d;
+    archStage.querySelectorAll('.mm-wrap').forEach((w,i)=> w.classList.toggle('hidden', i!==d));
+    archCaption.textContent = archCaptions[d];
+  });
+});
+
+/* ---- Architecture zoom/pan modal ---- */
+const archModal   = document.getElementById('archModal');
+const archCanvas  = document.getElementById('archModalCanvas');
+const archMStage  = document.getElementById('archModalStage');
+const zPctEl      = document.getElementById('mzPct');
+let mScale=1, mTx=0, mTy=0;
+function applyMTransform(){
+  archCanvas.style.transform = `translate(-50%,-50%) translate(${mTx}px,${mTy}px) scale(${mScale})`;
+  zPctEl.textContent = Math.round(mScale*100)+'%';
+}
+function openArchModal(){
+  const src = archStage.querySelectorAll('.mm-wrap')[archActive]?.querySelector('svg');
+  if(!src) return;
+  archCanvas.innerHTML = '';
+  const clone = src.cloneNode(true);
+  clone.removeAttribute('style');
+  // give the clone an intrinsic size from its viewBox, scaled to fill most of the stage height
+  const vb = (src.getAttribute('viewBox')||'0 0 900 600').split(/\s+/).map(Number);
+  const vbW = vb[2]||900, vbH = vb[3]||600;
+  const fit = Math.min((archMStage.clientHeight*0.9)/vbH, (archMStage.clientWidth*0.9)/vbW) || 1;
+  clone.setAttribute('width', vbW*fit); clone.setAttribute('height', vbH*fit);
+  archCanvas.appendChild(clone);
+  document.getElementById('archModalTitle').textContent = archTitles[archActive];
+  document.getElementById('archModalSub').textContent = archCaptions[archActive].split('·').pop().trim();
+  mScale=1; mTx=0; mTy=0; applyMTransform();
+  archModal.classList.add('open');
+}
+function closeArchModal(){ archModal.classList.remove('open'); }
+function zoomBy(f, cx, cy){
+  const ns = Math.min(6, Math.max(0.25, mScale*f));
+  if(cx!=null){ // zoom toward a point (relative to stage center)
+    const r = mScale/ns;
+    mTx = cx - (cx - mTx)*(ns/mScale);
+    mTy = cy - (cy - mTy)*(ns/mScale);
+  }
+  mScale = ns; applyMTransform();
+}
+document.getElementById('archExpandBtn').addEventListener('click', openArchModal);
+document.getElementById('mzIn').addEventListener('click', ()=>zoomBy(1.25));
+document.getElementById('mzOut').addEventListener('click', ()=>zoomBy(1/1.25));
+document.getElementById('mzReset').addEventListener('click', ()=>{ mScale=1; mTx=0; mTy=0; applyMTransform(); });
+document.getElementById('mzClose').addEventListener('click', closeArchModal);
+archModal.addEventListener('mousedown', e=>{ if(e.target===archModal) closeArchModal(); });
+archMStage.addEventListener('wheel', e=>{
+  e.preventDefault();
+  const rect = archMStage.getBoundingClientRect();
+  const cx = e.clientX - rect.left - rect.width/2;
+  const cy = e.clientY - rect.top - rect.height/2;
+  zoomBy(e.deltaY < 0 ? 1.12 : 1/1.12, cx, cy);
+}, {passive:false});
+let dragging=false, dsx=0, dsy=0;
+archMStage.addEventListener('mousedown', e=>{ dragging=true; dsx=e.clientX-mTx; dsy=e.clientY-mTy; archMStage.classList.add('grabbing'); });
+window.addEventListener('mousemove', e=>{ if(!dragging) return; mTx=e.clientX-dsx; mTy=e.clientY-dsy; applyMTransform(); });
+window.addEventListener('mouseup', ()=>{ dragging=false; archMStage.classList.remove('grabbing'); });
+
+function buildAttackFlow(flowId, detailId, stages){
+  const flow = document.getElementById(flowId);
+  const detail = document.getElementById(detailId);
+  stages.forEach((s,i)=>{
+    const node = document.createElement('div');
+    node.className = 'anode';
+    node.innerHTML = `<div class="an">STAGE ${String(i+1).padStart(2,'0')}</div>`+
+      `<div class="at">${s.short}</div>`+
+      (s.tag ? `<div class="atag">${s.tag}</div>` : '');
+    node.addEventListener('click', ()=>{
+      flow.querySelectorAll('.anode').forEach(n=>n.classList.remove('on'));
+      node.classList.add('on');
+      detail.innerHTML = `<span class="k">${s.t}</span>` + s.d.replace(/\n/g,'<br>');
+    });
+    flow.appendChild(node);
+    if(i < stages.length-1){
+      const conn = document.createElement('div');
+      conn.className = 'aconn';
+      flow.appendChild(conn);
+    }
+  });
+}
+
+/* ---- Problem chart ---- */
+new Chart(document.getElementById('problemChart'), {
+  type:'bar',
+  data:{
+    labels:['Phishing/\nSpoofing','Extortion','Personal data\nbreach','Investment\nfraud (loss $B)'],
+    datasets:[{
+      data:[193407,86415,64882,6500],
+      backgroundColor:['#4EC6D2','#E0A244','#5F93A6','#E85D62'],
+      borderRadius:6,
+    }]
+  },
+  options:{
+    plugins:{legend:{display:false}, title:{display:true, text:'FBI IC3 2024 — complaint volume (first 3 bars) & investment-fraud losses in $B (4th bar)', color:'#828FA6', font:{size:10.5}}},
+    scales:{
+      x:{ticks:{color:'#828FA6', font:{size:10}}, grid:{display:false}},
+      y:{ticks:{color:'#828FA6', font:{size:10}}, grid:{color:'rgba(128,150,185,.1)'}}
+    }
+  }
+});
+
+/* ---- Anomaly scatter ---- */
+function genScatter(threshold){
+  const pct = threshold/100;
+  const normal = Array.from({length:70}, ()=>({x:20+Math.random()*40+Math.random()*10, y:20+Math.random()*40+Math.random()*10}));
+  const anomalies = Array.from({length:14}, ()=>({x: Math.random()>0.5 ? 5+Math.random()*10 : 85+Math.random()*10, y: Math.random()>0.5 ? 5+Math.random()*10 : 85+Math.random()*10}));
+  return {normal, anomalies};
+}
+let scatterChart;
+function drawScatter(threshold){
+  const {normal, anomalies} = genScatter(threshold);
+  const cutoff = 100-threshold; // fewer points flagged as threshold rises
+  const flaggedCount = Math.max(3, Math.round(anomalies.length * (threshold/85)));
+  const shown = anomalies.slice(0, Math.min(anomalies.length, flaggedCount));
+  const data = {
+    datasets:[
+      {label:'Normal behaviour', data:normal, backgroundColor:'rgba(78,198,210,.55)', pointRadius:4},
+      {label:'Flagged anomalies', data:shown, backgroundColor:'#E85D62', pointRadius:6, pointStyle:'crossRot', borderWidth:2, borderColor:'#E85D62'}
+    ]
+  };
+  if(scatterChart){ scatterChart.data = data; scatterChart.update(); return; }
+  scatterChart = new Chart(document.getElementById('scatterChart'), {
+    type:'scatter', data,
+    options:{
+      plugins:{legend:{labels:{color:'#828FA6', font:{size:10.5}}}},
+      scales:{
+        x:{ticks:{display:false}, grid:{color:'rgba(128,150,185,.08)'}, title:{display:true,text:'feature dim 1',color:'#525C72',font:{size:10}}},
+        y:{ticks:{display:false}, grid:{color:'rgba(128,150,185,.08)'}, title:{display:true,text:'feature dim 2',color:'#525C72',font:{size:10}}},
+      }
+    }
+  });
+}
+drawScatter(85);
+document.getElementById('threshSlider').addEventListener('input', e=>{
+  document.getElementById('threshVal').textContent = e.target.value + 'th pct.';
+  drawScatter(+e.target.value);
+});
+
+/* ---- Feature grid ---- */
+const features = [
+  {t:'Connection metadata', d:'Source/dest, ports, protocol — never packet contents.', pipe:'Network pillar → flow_collector.py → 60s windows'},
+  {t:'Login/connection frequency', d:'Bursts and unusual cadence within a window.', pipe:'Network pillar → Isolation Forest features'},
+  {t:'Beaconing / timing pattern', d:'Regular, low-and-slow outbound intervals across windows.', pipe:'Network pillar → TranAD (temporal sequence)'},
+  {t:'URL structure', d:'Domain shape, brand-name embedding, suspicious TLD patterns.', pipe:'Phishing pillar → content_classifier (ONNX URL model)'},
+  {t:'Email / page text', d:'Language and urgency cues in pasted or opened content.', pipe:'Phishing pillar → content_classifier (BERT text model)'},
+  {t:'Domain reputation', d:'WHOIS age/registrar signals, VirusTotal verdicts.', pipe:'Phishing pillar → domain_reputation tool'},
+  {t:'Page fingerprint', d:'Rendered DOM, hotlinked assets, response headers, resolved IP.', pipe:'Phishing pillar → inspect_website (headless Chromium)'},
+  {t:'MITRE technique match', d:'Nearest ATT&CK technique for an escalated network flow.', pipe:'Network pillar → SecureBERT embedding lookup'},
+];
+const featGrid = document.getElementById('featGrid');
+const featDetail = document.getElementById('featDetail');
+features.forEach(f=>{
+  const c = document.createElement('div');
+  c.className = 'card feat';
+  c.innerHTML = `<div class="icon">◆</div><div class="t">${f.t}</div><div class="d">${f.d}</div>`;
+  c.addEventListener('click', ()=>{
+    featGrid.querySelectorAll('.feat').forEach(x=>x.classList.remove('on'));
+    c.classList.add('on');
+    featDetail.innerHTML = `<span class="k">${f.t} — pipeline entry point</span>${f.pipe}`;
+  });
+  featGrid.appendChild(c);
+});
+
+/* ---- Dashboard ---- */
+let timelineChart;
+function initTimeline(){
+  const labels = Array.from({length:20}, (_,i)=>`${i}m`);
+  const data = Array.from({length:20}, ()=> 20+Math.random()*30);
+  timelineChart = new Chart(document.getElementById('timelineChart'), {
+    type:'line',
+    data:{labels, datasets:[{data, borderColor:'#4EC6D2', backgroundColor:'rgba(78,198,210,.12)', fill:true, tension:.35, pointRadius:0, borderWidth:2}]},
+    options:{
+      plugins:{legend:{display:false}},
+      scales:{x:{ticks:{color:'#525C72', font:{size:9}}, grid:{display:false}}, y:{ticks:{color:'#525C72', font:{size:9}}, grid:{color:'rgba(128,150,185,.08)'}}}
+    }
+  });
+}
+initTimeline();
+
+const alerts = [
+  {t:'09:42', s:'high', title:'Impossible travel detected', body:'Two authenticated sessions from geographically incompatible locations within 4 minutes. Flagged by Isolation Forest, mapped to MITRE T1078 (Valid Accounts).'},
+  {t:'09:45', s:'med', title:'Multiple failed logins', body:'6 failed authentication attempts against one account within a single 60s window — above the persisted percentile threshold.'},
+  {t:'09:48', s:'low', title:'Suspicious URL behaviour', body:'A pasted link scored ambiguous by the local ONNX model; escalated to the full agent for a WHOIS/VirusTotal + sandbox check.'},
+];
+const feed = document.getElementById('alertFeed');
+const alertDetail = document.getElementById('alertDetail');
+alerts.forEach(a=>{
+  const row = document.createElement('div');
+  row.className = 'alert-row';
+  row.innerHTML = `<span><span class="t">${a.t}</span><span class="sev ${a.s}"></span>${a.title}</span><span style="color:var(--dim);">›</span>`;
+  row.addEventListener('click', ()=>{
+    alertDetail.style.display = 'block';
+    alertDetail.innerHTML = `<span class="k">${a.t} — ${a.title}</span>${a.body}`;
+  });
+  feed.appendChild(row);
+});
+
+/* ---- Detection Results (real evaluation data) ---- */
+/* Source: "Network anomaly models — full evaluation report" (CICIDS2017,
+   held-out Monday-benign calibration). IF = per-flow; TranAD = per-60s-window. */
+const RES = [
+  {k:'DDoS (Fri PM)',         if:{auc:'0.688', f1:'0.256', rec:'15.9%', best:'0.808 (P50)'}, tr:{auc:'0.981', f1:'0.884', rec:'90.5%', best:'0.909 (P50)'}, f1if:0.256, f1tr:0.884, note:'TranAD wins decisively — a volumetric burst is obvious across a 60s window, far less so flow-by-flow.'},
+  {k:'DoS/Heartbleed (Wed)',  if:{auc:'0.861', f1:'0.696', rec:'55.3%', best:'0.738 (P95)'}, tr:{auc:'0.691', f1:'0.317', rec:'22.1%', best:'0.333 (P80)'}, f1if:0.696, f1tr:0.317, note:'Isolation Forest wins — Hulk/GoldenEye/slowloris floods carry a distinctive per-flow signature that dilutes inside a 60s window.'},
+  {k:'PortScan (Fri PM)',     if:{auc:'0.557', f1:'0.000', rec:'0.0%',  best:'0.581 (P50)'}, tr:{auc:'0.647', f1:'0.564', rec:'40.7%', best:'0.564 (P99)'}, f1if:0.000, f1tr:0.564, note:'Only TranAD works — scanning is an inherently temporal pattern a single flow can’t show.'},
+  {k:'Bot (Fri AM)',          if:{auc:'0.608', f1:'0.020', rec:'2.2%',  best:'0.037 (P50)'}, tr:{auc:'0.754', f1:'0.114', rec:'6.1%',  best:'0.420 (P50)'}, f1if:0.020, f1tr:0.114, note:'Beaconing is temporal — TranAD carries it (best F1 0.42); Isolation Forest effectively misses it.'},
+  {k:'Infiltration (Thu PM)', if:{auc:'0.937', f1:'0.009', rec:'38.9%', best:'0.009 (P99)'}, tr:{auc:'0.716', f1:'0.476', rec:'53.6%', best:'0.476 (P70)'}, f1if:0.009, f1tr:0.476, note:'TranAD detects it (F1 0.48). Isolation Forest ranks it well (AUC 0.94) but not at the shipped threshold.'},
+  {k:'Brute force (Tue)',     if:{auc:'0.671', f1:'0.000', rec:'0.0%',  best:'0.124 (P60)'}, tr:{auc:'0.350', f1:'0.000', rec:'0.0%',  best:'0.031 (P50)'}, f1if:0.000, f1tr:0.000, note:'Open gap for both — neither per-flow stats nor 60s windows carry the FTP/SSH-Patator signature. The clear next investment.'},
+];
+
+/* view toggle: per-attack bars vs DDoS sweep image */
+document.querySelectorAll('#resSeg button').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    document.querySelectorAll('#resSeg button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    const v=b.dataset.v;
+    document.getElementById('resView-bars').style.display  = v==='bars'  ? 'block':'none';
+    document.getElementById('resView-sweep').style.display = v==='sweep' ? 'block':'none';
+  });
+});
+
+/* grouped bar: IF vs TranAD F1 @ P99 per attack */
+new Chart(document.getElementById('resF1Chart'), {
+  type:'bar',
+  data:{
+    labels: RES.map(r=>r.k.replace(/ \(.*\)/,'')),
+    datasets:[
+      {label:'Isolation Forest', data:RES.map(r=>r.f1if), backgroundColor:'#E0A244', borderRadius:5},
+      {label:'TranAD',           data:RES.map(r=>r.f1tr), backgroundColor:'#4EC6D2', borderRadius:5},
+    ]
+  },
+  options:{
+    plugins:{legend:{labels:{color:'#828FA6', font:{size:11}}}, title:{display:true, text:'F1 at production threshold (P99), per attack type', color:'#828FA6', font:{size:10.5}}},
+    scales:{
+      x:{ticks:{color:'#828FA6', font:{size:9.5}}, grid:{display:false}},
+      y:{min:0, max:1, ticks:{color:'#828FA6', font:{size:9}}, grid:{color:'rgba(128,150,185,.1)'}}
+    }
+  }
+});
+
+/* attack-type selector -> metrics + note */
+const atkSeg = document.getElementById('atkSeg');
+const atkMetrics = document.getElementById('atkMetrics');
+const atkNote = document.getElementById('atkNote');
+function showAttack(idx){
+  const r = RES[idx];
+  atkSeg.querySelectorAll('button').forEach((b,i)=>b.classList.toggle('on', i===idx));
+  const col = (cls,name,m)=>`<div class="res-mcol ${cls}"><h4>${name}</h4>`+
+    `<div class="res-mrow"><span class="rk">AUC</span><span class="rv">${m.auc}</span></div>`+
+    `<div class="res-mrow"><span class="rk">F1 @ P99</span><span class="rv">${m.f1}</span></div>`+
+    `<div class="res-mrow"><span class="rk">Recall @ P99</span><span class="rv">${m.rec}</span></div>`+
+    `<div class="res-mrow"><span class="rk">Best F1 (pct)</span><span class="rv">${m.best}</span></div></div>`;
+  atkMetrics.innerHTML = col('ifc','Isolation Forest', r.if) + col('trc','TranAD', r.tr);
+  atkNote.innerHTML = `<span class="k">${r.k}</span>${r.note}`;
+}
+RES.forEach((r,i)=>{
+  const b=document.createElement('button');
+  b.textContent = r.k.replace(/ \(.*\)/,'');
+  b.addEventListener('click', ()=>showAttack(i));
+  atkSeg.appendChild(b);
+});
+showAttack(0);
+
+/* full metrics table (collapsible) */
+const resTableWrap = document.getElementById('resTableWrap');
+const resTableBtn = document.getElementById('resTableBtn');
+resTableWrap.innerHTML = `<div class="card"><table class="res-table">
+  <tr><th>Attack type</th><th>IF AUC</th><th>IF F1@P99</th><th>IF recall</th><th>IF best F1</th>
+      <th>TranAD AUC</th><th>TranAD F1@P99</th><th>TranAD recall</th><th>TranAD best F1</th></tr>
+  ${RES.map(r=>`<tr><td>${r.k}</td>
+    <td>${r.if.auc}</td><td>${r.if.f1}</td><td>${r.if.rec}</td><td class="d">${r.if.best}</td>
+    <td>${r.tr.auc}</td><td>${r.tr.f1}</td><td>${r.tr.rec}</td><td class="d">${r.tr.best}</td></tr>`).join('')}
+  </table>
+  <div class="scroll-note" style="margin-top:10px;">IF rows are per-flow; TranAD rows are per-60s-window. “Best F1” = highest F1 at any percentile, and where.</div>
+  </div>`;
+resTableBtn.addEventListener('click', ()=>{
+  const open = resTableWrap.style.display === 'block';
+  resTableWrap.style.display = open ? 'none' : 'block';
+  resTableBtn.textContent = open ? 'Show full metrics table' : 'Hide full metrics table';
+});
+
+/* init */
+updateRail();
+</script>
+</body>
+</html>
