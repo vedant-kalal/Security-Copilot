@@ -1,6 +1,7 @@
 """
 The tools the agent binds and can call (spec section 4, plus
-`web_search` added afterward — see that file's docstring).
+`web_search` and `recall_similar_cases` added afterward — see each
+file's own docstring).
 
 Each tool is a plain async function decorated with `@tool` from
 langchain_core — the decorator turns the function's docstring into the
@@ -12,11 +13,19 @@ reason to change them.
 Add another tool by writing its own file here and adding it to
 ALL_TOOLS below — nothing else needs to change.
 """
+from tools.case_memory import recall_similar_cases
 from tools.content_classifier import content_classifier
 from tools.domain_reputation import domain_reputation
 from tools.inspect_website import inspect_website
 from tools.web_search import web_search
 
-ALL_TOOLS = [inspect_website, domain_reputation, content_classifier, web_search]
+ALL_TOOLS = [inspect_website, domain_reputation, content_classifier, web_search, recall_similar_cases]
 
-__all__ = ["ALL_TOOLS", "inspect_website", "domain_reputation", "content_classifier", "web_search"]
+__all__ = [
+    "ALL_TOOLS",
+    "inspect_website",
+    "domain_reputation",
+    "content_classifier",
+    "web_search",
+    "recall_similar_cases",
+]

@@ -18,6 +18,7 @@ export default defineConfig({
       input: {
         popup: path.resolve(__dirname, "src/popup/index.html"),
         options: path.resolve(__dirname, "src/options/index.html"),
+        blocked: path.resolve(__dirname, "src/blocked/index.html"),
         background: path.resolve(__dirname, "src/background/index.ts"),
       },
       output: {

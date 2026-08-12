@@ -17,24 +17,35 @@ from functools import lru_cache
 from typing import Any, Optional, Sequence
 
 from config import get_settings
-from exceptions import LLMRateLimitedError
+from exceptions import LLMRateLimitedError, LLMUnavailableError
 from logger import get_logger
 
 logger = get_logger(__name__)
 
 
-def _is_rate_limit(exc: BaseException) -> bool:
-    """Best-effort detection of an HTTP 429 across SDK/langchain wrappings."""
+def _status_of(exc: BaseException) -> Optional[int]:
     status = getattr(exc, "status_code", None)
     if status is None:
         response = getattr(exc, "response", None)
         status = getattr(response, "status_code", None)
-    if status == 429:
+    return status
+
+
+def _is_rate_limit(exc: BaseException) -> bool:
+    """Best-effort detection of an HTTP 429 across SDK/langchain wrappings."""
+    if _status_of(exc) == 429:
         return True
     if type(exc).__name__ == "RateLimitError":
         return True
     text = str(exc).lower()
     return "429" in text or "rate limit" in text or "rate_limit" in text
+
+
+def _is_account_error(exc: BaseException) -> bool:
+    """402 (out of credits — the one actually seen in practice), 401/403
+    (an invalid/revoked key). Distinct from a 429: these won't resolve by
+    just trying again a moment later."""
+    return _status_of(exc) in (401, 402, 403)
 
 
 @lru_cache
@@ -76,10 +87,16 @@ class _RateLimitedLLM:
             client = client.bind_tools(self._tools)
         try:
             return client.invoke(messages, **kwargs)
-        except Exception as exc:  # noqa: BLE001 — re-raised below if not a 429
+        except Exception as exc:  # noqa: BLE001 — re-raised below if neither case matches
             if _is_rate_limit(exc):
                 logger.warning("OpenRouter rate-limited this request (HTTP 429)")
                 raise LLMRateLimitedError("OpenRouter is rate-limiting this API key. Try again shortly.") from exc
+            if _is_account_error(exc):
+                logger.error("OpenRouter rejected this request at the account level (HTTP %s): %s", _status_of(exc), exc)
+                raise LLMUnavailableError(
+                    "The LLM provider (OpenRouter) rejected this request — the API key may be out of "
+                    "credits or invalid. Check the account, not this specific request."
+                ) from exc
             raise
 
 

@@ -7,6 +7,7 @@ agent_node.py, output_node.py) so this file stays a pure wiring diagram.
 """
 from __future__ import annotations
 
+import asyncio
 from functools import lru_cache
 from typing import Optional
 
@@ -19,9 +20,10 @@ from agent.output_node import output_node
 from agent.router_node import route_after_router, router_node
 from agent.state import AgentState, CaseType, Verdict
 from config import get_settings
-from exceptions import LLMRateLimitedError
+from exceptions import LLMRateLimitedError, LLMUnavailableError
 from history import record_run
 from logger import get_logger
+from memory.case_index import record_case
 from report import generate_report
 from tools import ALL_TOOLS
 from utils.screenshots import save_screenshot
@@ -49,6 +51,22 @@ RATE_LIMITED_VERDICT = Verdict(
         "The investigation could not run because the LLM provider (OpenRouter) is temporarily "
         "rate-limiting this API key. This is a service limitation, not a judgment about the "
         "target — treat it as unresolved and re-run in a few moments."
+    ),
+    mitigation=None,
+)
+
+# OpenRouter rejected the request at the account level (out of credits, or
+# an invalid key) — see exceptions.LLMUnavailableError. Unlike a rate
+# limit, re-running in a few moments won't help; the account needs
+# attention. Still fails safe to the same low-confidence "suspicious"
+# shape rather than a raw 500.
+LLM_UNAVAILABLE_VERDICT = Verdict(
+    label="suspicious",
+    confidence=0.3,
+    reason=(
+        "The investigation could not run because the LLM provider (OpenRouter) rejected the "
+        "request — the API key may be out of credits or invalid. This is a service configuration "
+        "issue, not a judgment about the target — treat it as unresolved until that's fixed."
     ),
     mitigation=None,
 )
@@ -91,6 +109,7 @@ async def run_case(case_type: CaseType, raw_input: str, mitre_technique: Optiona
                 "raw_input": raw_input,
                 "messages": [],
                 "mitre_technique": mitre_technique,
+                "email_links": None,
                 "verdict": None,
             },
             config={"recursion_limit": settings.AGENT_RECURSION_LIMIT},
@@ -102,6 +121,9 @@ async def run_case(case_type: CaseType, raw_input: str, mitre_technique: Optiona
     except LLMRateLimitedError:
         logger.warning("Case could not run — OpenRouter rate-limited: %r", raw_input)
         return dict(RATE_LIMITED_VERDICT)
+    except LLMUnavailableError as exc:
+        logger.error("Case could not run — OpenRouter rejected the request: %r (%s)", raw_input, exc)
+        return dict(LLM_UNAVAILABLE_VERDICT)
 
 
 # Friendly, human-readable labels for what the agent is actually doing —
@@ -128,7 +150,12 @@ def _friendly_step(tool_name: str, call_number: int) -> str:
     return _TOOL_LABELS.get(tool_name, f"Running {tool_name}...")
 
 
-async def stream_case_traced(case_type: CaseType, raw_input: str, mitre_technique: Optional[dict] = None):
+async def stream_case_traced(
+    case_type: CaseType,
+    raw_input: str,
+    mitre_technique: Optional[dict] = None,
+    email_links: Optional[list[str]] = None,
+):
     """Same investigation as `run_case_traced` below, but as an async
     generator that yields a `{"type": "progress", "label": ...}` event
     after every step instead of only returning once at the very end —
@@ -139,6 +166,13 @@ async def stream_case_traced(case_type: CaseType, raw_input: str, mitre_techniqu
     This *is* the implementation now — `run_case_traced` just consumes it
     and returns the final `{"type": "done", ...}` event's payload, so the
     two can never drift out of sync with each other.
+
+    `email_links` is only meaningful for case_type "email" — the links
+    already extracted from the email body (see
+    utils/validators.extract_urls_from_text/dedupe_links_by_domain) and
+    handed to agent_node.py's seed message so every one gets its own
+    investigation instead of relying on the model to notice them in the
+    raw text.
 
     Ends with exactly one `{"type": "done", "verdict": ..., "run_id": ...,
     "report_path": ...}` event.
@@ -151,6 +185,7 @@ async def stream_case_traced(case_type: CaseType, raw_input: str, mitre_techniqu
         "raw_input": raw_input,
         "messages": [],
         "mitre_technique": mitre_technique,
+        "email_links": email_links,
         "verdict": None,
     }
 
@@ -158,12 +193,13 @@ async def stream_case_traced(case_type: CaseType, raw_input: str, mitre_techniqu
     pending_calls: list[dict] = []
     verdict: Optional[dict] = None
     call_counts: dict[str, int] = {}
+    recursion_limit = settings.AGENT_RECURSION_LIMIT + len(email_links or []) * settings.EMAIL_LINK_RECURSION_BUDGET
 
     yield {"type": "progress", "label": "Starting investigation..."}
 
     try:
         async for step in graph.astream(
-            initial_state, config={"recursion_limit": settings.AGENT_RECURSION_LIMIT}, stream_mode="updates"
+            initial_state, config={"recursion_limit": recursion_limit}, stream_mode="updates"
         ):
             for node_name, update in step.items():
                 update = update or {}
@@ -199,20 +235,39 @@ async def stream_case_traced(case_type: CaseType, raw_input: str, mitre_techniqu
                 elif node_name == "output":
                     verdict = update["verdict"]
     except GraphRecursionError:
-        logger.warning("Case hit the recursion limit (%d) without concluding: %r", settings.AGENT_RECURSION_LIMIT, raw_input)
+        logger.warning("Case hit the recursion limit (%d) without concluding: %r", recursion_limit, raw_input)
         verdict = dict(INCONCLUSIVE_VERDICT)
     except LLMRateLimitedError:
         logger.warning("Case could not run — OpenRouter rate-limited: %r", raw_input)
         verdict = dict(RATE_LIMITED_VERDICT)
+    except LLMUnavailableError as exc:
+        logger.error("Case could not run — OpenRouter rejected the request: %r (%s)", raw_input, exc)
+        verdict = dict(LLM_UNAVAILABLE_VERDICT)
 
     yield {"type": "progress", "label": "Finalizing the verdict & saving the report..."}
     report_path = generate_report(case_type, raw_input, tool_call_records, verdict)
     run_id = record_run(case_type, raw_input, tool_call_records, verdict, report_path)
 
+    # Only remember *fresh* investigations — tool_call_records is empty for
+    # a router shortcut (cache/blocklist hit, see route_after_router), which
+    # never produced any new reasoning worth recalling later. Awaited (not
+    # fire-and-forget) so it can't be silently GC'd mid-write; runs off the
+    # event loop since this is a real SecureBERT forward pass, same as every
+    # other embedding call in this codebase.
+    if tool_call_records and verdict:
+        await asyncio.to_thread(
+            record_case, run_id, case_type, raw_input, verdict.get("label", ""), verdict.get("reason", "")
+        )
+
     yield {"type": "done", "verdict": verdict, "run_id": run_id, "report_path": report_path}
 
 
-async def run_case_traced(case_type: CaseType, raw_input: str, mitre_technique: Optional[dict] = None) -> dict:
+async def run_case_traced(
+    case_type: CaseType,
+    raw_input: str,
+    mitre_technique: Optional[dict] = None,
+    email_links: Optional[list[str]] = None,
+) -> dict:
     """Same as `run_case`, but captures every tool call along the way (not
     just the final verdict) and records the whole thing as one entry in
     history.py + report.py — this is what the API and cli.py both use so
@@ -222,7 +277,7 @@ async def run_case_traced(case_type: CaseType, raw_input: str, mitre_technique: 
     `stream_case_traced` above for the actual step-by-step implementation
     — this just drains it and keeps the final result.
     """
-    async for event in stream_case_traced(case_type, raw_input, mitre_technique):
+    async for event in stream_case_traced(case_type, raw_input, mitre_technique, email_links):
         if event["type"] == "done":
             return {"verdict": event["verdict"], "run_id": event["run_id"], "report_path": event["report_path"]}
     raise RuntimeError("stream_case_traced ended without a 'done' event")  # unreachable

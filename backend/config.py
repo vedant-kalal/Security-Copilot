@@ -61,6 +61,12 @@ class Settings(BaseSettings):
     # while still bounding a runaway agent (verified empirically: a limit of
     # 5 cut off a normal 2-tool-call investigation before it could conclude).
     AGENT_RECURSION_LIMIT: int = Field(default=15, description="Max LangGraph super-steps before failing safe")
+    # A multi-link email needs real headroom beyond the single-URL budget
+    # above — investigating each extracted link costs its own inspect_website
+    # + domain_reputation round trip (~4 hops), on top of the base budget.
+    # graph.py adds `len(email_links) * this` to AGENT_RECURSION_LIMIT for
+    # email cases only; link/network_flow cases are unaffected.
+    EMAIL_LINK_RECURSION_BUDGET: int = Field(default=5, description="Extra recursion hops budgeted per email link")
 
     # --- Router fast path (spec section 2) ---------------------------------
     CACHE_DB_PATH: str = "data/cache.db"
@@ -143,6 +149,13 @@ class Settings(BaseSettings):
     MITRE_STIX_URL: str = (
         "https://raw.githubusercontent.com/mitre/cti/master/enterprise-attack/enterprise-attack.json"
     )
+
+    # memory/case_index.py — a growing similarity index over past
+    # investigations (SecureBERT again, but raw/un-whitened: unlike the
+    # fixed ~700-technique MITRE corpus, this one grows one case at a time,
+    # so there's no fixed corpus to fit a PCA-whitening projection over).
+    CASE_MEMORY_DIR: str = "data/case_memory"
+    CASE_MEMORY_TOP_K: int = 3
 
     @property
     def is_production(self) -> bool:

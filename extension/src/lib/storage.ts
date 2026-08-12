@@ -7,11 +7,18 @@
  */
 export interface CopilotStorage {
   apiBaseUrl: string;
+  // Separate from apiBaseUrl on purpose: the Next.js dashboard (dashboard/)
+  // is its own dev server on its own port (:3000 by default), not something
+  // the FastAPI backend (:8010) serves — see run_all.bash/start_all.bash's
+  // WITH_DASHBOARD/DASHBOARD_PORT. This is where "Full report" and automatic
+  // report tabs open a run, instead of the backend's own built-in viewer.
+  dashboardBaseUrl: string;
   autoScanEnabled: boolean;
 }
 
 const DEFAULTS: CopilotStorage = {
   apiBaseUrl: "http://127.0.0.1:8010",
+  dashboardBaseUrl: "http://localhost:3000",
   autoScanEnabled: true,
 };
 
@@ -53,19 +60,22 @@ export async function clearTabVerdict(tabId: number): Promise<void> {
   await chrome.storage.session.remove(`tab_verdict_${tabId}`);
 }
 
-/** Tracks a full investigation (background.ts's runFullCheck) that's
- * currently in flight for a tab, so the popup can tell "already checking"
- * apart from "idle" and avoid firing a second, redundant /check-links call
- * for the same URL the banner's "Full report" button already started.
+/** Tracks a full investigation (background.ts's runFullCheck /
+ * runFullEmailCheck) that's currently in flight for a tab, so the popup
+ * can tell "already checking" apart from "idle" and avoid firing a
+ * second, redundant call for the same URL the banner's "Full report"
+ * button (or the popup's own webmail auto-scan) already started.
  * `step` is the live progress label from the most recent
  * FULL_CHECK_PROGRESS event (see types/index.ts's CheckLinksStreamEvent)
  * — the popup reads it on mount and watches it update via
  * chrome.storage.onChanged, so it shows the same live progress the
  * banner does even though a popup can't receive runtime messages sent
- * while it was closed. */
+ * while it was closed. `kind` lets a freshly-opened popup restore an
+ * in-progress check with the right label instead of assuming "link". */
 export interface PendingFullCheck {
   url: string;
   startedAt: number;
+  kind: "link" | "email";
   step?: string;
 }
 

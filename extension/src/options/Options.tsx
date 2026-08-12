@@ -6,6 +6,7 @@ import { getStorage, setStorage } from "@/lib/storage";
 
 export function Options() {
   const [apiBaseUrl, setApiBaseUrl] = useState("http://127.0.0.1:8010");
+  const [dashboardBaseUrl, setDashboardBaseUrl] = useState("http://localhost:3000");
   const [savedMessage, setSavedMessage] = useState<string | null>(null);
   const [autoScanEnabled, setAutoScanEnabled] = useState(true);
 
@@ -13,13 +14,17 @@ export function Options() {
     void (async () => {
       const storage = await getStorage();
       setApiBaseUrl(storage.apiBaseUrl);
+      setDashboardBaseUrl(storage.dashboardBaseUrl);
       setAutoScanEnabled(storage.autoScanEnabled);
     })();
   }, []);
 
   async function handleSave(event: React.FormEvent) {
     event.preventDefault();
-    await setStorage({ apiBaseUrl: apiBaseUrl.replace(/\/+$/, "") });
+    await setStorage({
+      apiBaseUrl: apiBaseUrl.replace(/\/+$/, ""),
+      dashboardBaseUrl: dashboardBaseUrl.replace(/\/+$/, ""),
+    });
     setSavedMessage("Saved.");
     setTimeout(() => setSavedMessage(null), 2000);
   }
@@ -81,15 +86,32 @@ export function Options() {
           Point the extension at your running security-copilot backend (<code className="rounded bg-panel-raised px-1.5 py-0.5 font-mono text-[11px] text-fog-dim">uvicorn api.app:app</code> in{" "}
           <code className="rounded bg-panel-raised px-1.5 py-0.5 font-mono text-[11px] text-fog-dim">backend/</code>). No sign-in is required.
         </p>
-        <form className="mt-4 flex gap-3" onSubmit={handleSave}>
+        <form className="mt-4 space-y-3" onSubmit={handleSave}>
           <input
             type="url"
             required
             value={apiBaseUrl}
             onChange={(e) => setApiBaseUrl(e.target.value)}
             placeholder="http://127.0.0.1:8010"
-            className="flex-1 rounded-lg border border-panel-line bg-void px-4 py-2.5 font-mono text-sm text-fog transition-all duration-200 focus:border-sentinel/50 focus:shadow-glow-sentinel focus:outline-none"
+            className="w-full rounded-lg border border-panel-line bg-void px-4 py-2.5 font-mono text-sm text-fog transition-all duration-200 focus:border-sentinel/50 focus:shadow-glow-sentinel focus:outline-none"
           />
+
+          <div>
+            <p className="mb-1.5 text-xs leading-relaxed text-fog-faint">
+              Dashboard (<code className="rounded bg-panel-raised px-1.5 py-0.5 font-mono text-[11px] text-fog-dim">pnpm dev</code> in{" "}
+              <code className="rounded bg-panel-raised px-1.5 py-0.5 font-mono text-[11px] text-fog-dim">dashboard/</code>) — where{" "}
+              <span className="text-fog">Full report</span> opens a run.
+            </p>
+            <input
+              type="url"
+              required
+              value={dashboardBaseUrl}
+              onChange={(e) => setDashboardBaseUrl(e.target.value)}
+              placeholder="http://localhost:3000"
+              className="w-full rounded-lg border border-panel-line bg-void px-4 py-2.5 font-mono text-sm text-fog transition-all duration-200 focus:border-sentinel/50 focus:shadow-glow-sentinel focus:outline-none"
+            />
+          </div>
+
           <button
             type="submit"
             className="flex items-center gap-2 rounded-lg border border-panel-line bg-panel px-4 py-2.5 text-xs font-semibold text-fog transition-all duration-200 hover:border-sentinel/30 hover:bg-panel-raised hover:shadow-glow-sentinel"

@@ -16,10 +16,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from api.routes_check_email import router as check_email_router
+from api.routes_check_email_stream import router as check_email_stream_router
 from api.routes_check_links import router as check_links_router
 from api.routes_check_links_stream import router as check_links_stream_router
 from api.routes_health import router as health_router
 from api.routes_quick_check import router as quick_check_router
+from api.routes_quick_check_email import router as quick_check_email_router
+from api.routes_report import router as report_router
 from api.routes_report_flow import router as report_flow_router
 from api.routes_runs import router as runs_router
 from config import get_settings
@@ -43,7 +46,13 @@ def create_app() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
-        allow_origin_regex=r"chrome-extension://.*",
+        # CORSMiddleware matches on the exact origin (scheme+host+port), so
+        # a bare "http://localhost" in CORS_ORIGINS above never matches a
+        # real browser origin like "http://localhost:3000" — the dashboard's
+        # dev server port. This regex covers the extension AND localhost/
+        # 127.0.0.1 on any port, so the dashboard's actual origin always
+        # matches regardless of which port it happens to be running on.
+        allow_origin_regex=r"chrome-extension://.*|http://(localhost|127\.0\.0\.1)(:\d+)?",
         allow_credentials=False,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -53,22 +62,27 @@ def create_app() -> FastAPI:
 
     register_exception_handlers(app)
 
-    # Specific routes must be registered before the catch-all static mounts
-    # below — Starlette matches routes in registration order, so a mount at
-    # "/" registered first would shadow every API path.
+    # Specific routes must be registered before the catch-all /screenshots
+    # mount below — Starlette matches routes in registration order.
     app.include_router(health_router)
     app.include_router(check_links_router)
     app.include_router(check_links_stream_router)
     app.include_router(check_email_router)
+    app.include_router(check_email_stream_router)
     app.include_router(quick_check_router)
+    app.include_router(quick_check_email_router)
     app.include_router(report_flow_router)
     app.include_router(runs_router)
+    app.include_router(report_router)
 
-    # Screenshots (utils/screenshots.py) and the small history UI (ui/) are
-    # both served as plain static files — neither needs its own route logic.
+    # Screenshots (utils/screenshots.py) and generated reports (report.py)
+    # are served as plain static files — neither needs its own route logic.
+    # The UI lives entirely in dashboard/ (its own Next.js dev server) now;
+    # the backend no longer serves one itself, so there's no mount at "/".
     Path(settings.SCREENSHOT_DIR).mkdir(parents=True, exist_ok=True)
     app.mount("/screenshots", StaticFiles(directory=settings.SCREENSHOT_DIR), name="screenshots")
-    app.mount("/", StaticFiles(directory="ui", html=True), name="ui")
+    Path(settings.REPORT_DIR).mkdir(parents=True, exist_ok=True)
+    app.mount("/reports", StaticFiles(directory=settings.REPORT_DIR), name="reports")
 
     return app
 

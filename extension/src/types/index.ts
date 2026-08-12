@@ -60,6 +60,19 @@ export interface QuickCheckResponse {
   detail?: string;
 }
 
+/** POST /quick-check-email response (api/routes_quick_check_email.py) —
+ * a single BERT text-classification pass, no agent loop, no links
+ * investigated. What the popup runs automatically the instant it opens
+ * on a recognized webmail tab (see lib/webmail.ts); "Run full scan"
+ * escalates to the real agent via RUN_FULL_EMAIL_CHECK below, which does
+ * investigate every link. */
+export interface QuickCheckEmailResponse {
+  label: "dangerous" | "suspicious" | "safe" | "unknown";
+  confidence: number;
+  source: "ml_model" | "error";
+  detail?: string;
+}
+
 /** Messages passed between background.ts (which owns navigation events and
  * the backend calls) and content.ts (which owns the in-page banner). */
 export type BackgroundToContentMessage =
@@ -87,8 +100,39 @@ export type ContentToBackgroundMessage =
   // extension page, not injected into the tab), so it has to say which
   // tab explicitly.
   | { type: "RUN_FULL_CHECK"; url: string; tabId?: number }
+  // From the popup — either the automatic webmail quick-check's "Run full
+  // scan" button, or the general-purpose "Check page text" button (any
+  // page, not just recognized webmail). `links` are real anchor hrefs
+  // already extracted from the DOM (see Popup.tsx's extractPageContent) —
+  // the same union-with-regex-extraction the backend does for a plain
+  // pasted email applies here too, but DOM hrefs catch "click here"-style
+  // links a text-only regex never could. `pageUrl` is the tab's URL at
+  // the time of the check — reused as the TabVerdict/PendingFullCheck key
+  // (see storage.ts) so reopening the popup on the same page restores the
+  // result exactly the way a link check's does, and always sent
+  // explicitly since this message only ever comes from the popup, which
+  // has no sender.tab of its own to fall back on.
+  | { type: "RUN_FULL_EMAIL_CHECK"; text: string; links: string[]; pageUrl: string; tabId?: number }
   // Sent only when the content script finds a password field inside a
   // form whose action posts to a different site than the page itself —
   // see content/index.ts's computePageSignals(). Not sent otherwise, so
   // its mere arrival already means something's worth a second look.
-  | { type: "PAGE_SIGNALS"; url: string; actionDomain: string };
+  | { type: "PAGE_SIGNALS"; url: string; actionDomain: string }
+  // From the popup, right after a successful POST /report — tells
+  // background.ts to re-fetch GET /blocklist immediately instead of
+  // waiting for its periodic chrome.alarms sync, so the domain just
+  // reported is enforced on the very next navigation, not several
+  // minutes later.
+  | { type: "REFRESH_BLOCKLIST" }
+  // From blocked/Blocked.tsx's "Proceed anyway" — background.ts records
+  // this exact URL as a one-time exception before Blocked.tsx navigates
+  // there itself, so onBeforeNavigate lets that one attempt through
+  // instead of immediately redirecting back to the same interstitial.
+  | { type: "ALLOW_ONCE"; url: string };
+
+/** POST /report response (backend/api/routes_report.py). */
+export interface ReportResponse {
+  domain: string;
+  added_to_blocklist: boolean;
+  virustotal: { reported: boolean; detail: string };
+}

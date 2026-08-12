@@ -28,7 +28,7 @@
       "run_at": "document_idle"
     }
   ],
-  "permissions": ["storage", "activeTab", "scripting", "webNavigation"],
+  "permissions": ["storage", "activeTab", "scripting", "webNavigation", "tabs", "alarms"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
   "minimum_chrome_version": "96"
 }

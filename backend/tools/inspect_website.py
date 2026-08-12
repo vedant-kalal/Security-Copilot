@@ -18,6 +18,20 @@ warranted, exactly the same way it already decides which tools to call
 at all. See agent/agent_node.py's system prompt for how deep it's
 told to go.
 
+Two more signal categories beyond page content, added because neither a
+URL string nor a WHOIS/VirusTotal domain lookup can see them:
+  - DOM/asset structure (`_summarize_assets`): whether the page's own
+    scripts/images/stylesheets are served from its own domain or hotlinked
+    from somewhere else. A cloned phishing kit very commonly skips copying
+    the real brand's assets and just references them live from the real
+    site — same visual result, dead giveaway once you look at where the
+    bytes actually come from.
+  - Deployment (`_get_deployment_info`): the responding server's raw HTTP
+    headers and resolved IP address — the IP specifically is worth handing
+    back to `domain_reputation`, which already accepts a bare IP (network-
+    flow cases report one directly), so the agent can check this exact
+    hosting IP's own reputation independent of the domain name.
+
 Uses LangChain's `content_and_artifact` response format: the base64
 screenshot is real evidence spec 4.1 asks for, but it's tens of
 thousands of tokens as text — sending it back through the LLM's context
@@ -55,16 +69,49 @@ from logger import get_logger
 logger = get_logger(__name__)
 
 _FORM_EXTRACT_JS = """
-(forms) => forms.map((f) => ({
-    action: f.action || null,
-    has_password_field: !!f.querySelector('input[type="password"]'),
-}))
+(forms) => forms.map((f) => {
+    // A named form control (e.g. <input name="action">) shadows the form
+    // element's own .action property with that control's element instead
+    // of the resolved URL string — a real HTML/DOM quirk. Falls back to
+    // resolving the raw attribute by hand when that happens, so this never
+    // sends back a DOM node Playwright can't serialize across the bridge
+    // (verified 2026-08 on a real Google sign-in page, whose form has an
+    // input named "action" — this broke every consumer of the field,
+    // silently, until the extension/dashboard actually rendered forms).
+    let action = null;
+    if (typeof f.action === 'string' && f.action) {
+        action = f.action;
+    } else {
+        const raw = f.getAttribute('action');
+        if (raw) {
+            try { action = new URL(raw, location.href).href; } catch { action = raw; }
+        }
+    }
+    return { action, has_password_field: !!f.querySelector('input[type="password"]') };
+})
 """
 
 _LINK_EXTRACT_JS = """
 (anchors) => anchors
     .map((a) => ({ href: a.href || null, text: (a.textContent || '').trim().slice(0, 80) }))
     .filter((l) => l.href && l.href.startsWith('http'))
+"""
+
+# DOM structure signal: which domains the page's own assets actually load
+# from. A cloned phishing kit typically either hosts a full copy of the
+# real site's logo/CSS/JS (same-origin, indistinguishable by this signal
+# alone) or — very commonly, because it's less work — just hotlinks them
+# straight from the real site. That second pattern (this page's HTML, but
+# most of its assets pulled live from one specific other domain) is a
+# strong, cheap tell that a URL-only or WHOIS/VirusTotal-only check has no
+# way to see at all.
+_ASSET_EXTRACT_JS = """
+() => ({
+    title: document.title || null,
+    scripts: Array.from(document.querySelectorAll('script[src]')).map((s) => s.src).filter(Boolean),
+    images: Array.from(document.querySelectorAll('img[src]')).map((i) => i.src).filter(Boolean),
+    stylesheets: Array.from(document.querySelectorAll('link[rel="stylesheet"]')).map((l) => l.href).filter(Boolean),
+})
 """
 
 
@@ -84,6 +131,58 @@ def _dedupe_links(links: list[dict], final_url: str, limit: int) -> list[dict]:
         if len(deduped) >= limit:
             break
     return deduped
+
+
+def _summarize_assets(assets: dict, final_url: str) -> dict:
+    """Turn the raw script/image/stylesheet URLs into origin-comparison
+    facts — the actual list of asset URLs is noisy and rarely useful to
+    the agent directly; whether they're same-origin vs. cross-origin, and
+    especially whether most of them funnel through one specific foreign
+    domain, is the signal that matters."""
+    origin = urlparse(final_url).netloc
+    all_urls = [*assets.get("scripts", []), *assets.get("images", []), *assets.get("stylesheets", [])]
+    origins = [urlparse(u).netloc for u in all_urls if u]
+    cross = [o for o in origins if o and o != origin]
+
+    dominant_foreign = None
+    if cross:
+        from collections import Counter
+
+        top_domain, top_count = Counter(cross).most_common(1)[0]
+        # Require both a minimum count and a majority share — one stray
+        # cross-origin analytics script shouldn't read the same as a page
+        # whose logo/CSS/JS all come from somewhere else.
+        if top_count >= 2 and top_count / len(cross) >= 0.5:
+            dominant_foreign = {"domain": top_domain, "asset_count": top_count}
+
+    return {
+        "page_title": assets.get("title"),
+        "asset_same_origin_count": len(origins) - len(cross),
+        "asset_cross_origin_count": len(cross),
+        "asset_dominant_foreign_origin": dominant_foreign,
+    }
+
+
+async def _get_deployment_info(response) -> dict:
+    """Where and on what this page is actually served from — headers and
+    the resolved server IP, neither of which a URL string or a WHOIS/
+    VirusTotal domain lookup can show. The IP specifically is worth the
+    agent's attention on its own: `domain_reputation` also accepts a raw
+    IP (spec: network_flow cases already report bare destination IPs), so
+    the agent can look up this exact hosting IP's own reputation the same
+    way it would a domain."""
+    try:
+        headers = await response.all_headers()
+    except Exception:  # noqa: BLE001 — headers are a bonus signal, never worth failing the whole tool over
+        headers = {}
+    try:
+        server = await response.server_addr()
+    except Exception:  # noqa: BLE001
+        server = None
+    return {
+        "response_headers": headers,
+        "server_ip": server.get("ipAddress") if server else None,
+    }
 
 
 async def _get_redirect_chain(response) -> list[dict]:
@@ -114,7 +213,7 @@ def _for_llm(full: dict) -> dict:
 
 @tool(response_format="content_and_artifact")
 async def inspect_website(url: str) -> tuple[dict, dict]:
-    """Opens a URL in an isolated sandbox browser and reports what the page actually does — final destination after redirects, a screenshot, visible page text, any forms and where they submit to, and every outbound network request. Use this first for almost any unknown link."""
+    """Opens a URL in an isolated sandbox browser and reports what the page actually does — final destination after redirects, a screenshot, visible page text, any forms and where they submit to, every outbound network request, whether its scripts/images/stylesheets are hosted on this same domain or hotlinked from somewhere else (a page that visually matches a real brand but loads that brand's own assets live is a strong tell), and the responding server's HTTP headers and IP address. Use this first for almost any unknown link."""
     settings = get_settings()
 
     try:
@@ -154,6 +253,12 @@ async def inspect_website(url: str) -> tuple[dict, dict]:
                     "forms": [],
                     "links": [],
                     "network_requests": network_requests,
+                    "page_title": None,
+                    "asset_same_origin_count": 0,
+                    "asset_cross_origin_count": 0,
+                    "asset_dominant_foreign_origin": None,
+                    "response_headers": {},
+                    "server_ip": None,
                 }
                 return _for_llm(full), full
 
@@ -163,6 +268,9 @@ async def inspect_website(url: str) -> tuple[dict, dict]:
             raw_links = await page.eval_on_selector_all("a", _LINK_EXTRACT_JS)
             links = _dedupe_links(raw_links, page.url, settings.SANDBOX_MAX_LINKS)
             redirect_chain = await _get_redirect_chain(response) if response else [{"url": url, "status": None}]
+            raw_assets = await page.evaluate(_ASSET_EXTRACT_JS)
+            asset_summary = _summarize_assets(raw_assets, page.url)
+            deployment = await _get_deployment_info(response) if response else {"response_headers": {}, "server_ip": None}
 
             full = {
                 "final_url": page.url,
@@ -173,6 +281,8 @@ async def inspect_website(url: str) -> tuple[dict, dict]:
                 "forms": forms,
                 "links": links,
                 "network_requests": network_requests,
+                **asset_summary,
+                **deployment,
             }
             return _for_llm(full), full
     except Exception as exc:  # noqa: BLE001 - never let a sandbox crash take down the agent loop
@@ -186,6 +296,12 @@ async def inspect_website(url: str) -> tuple[dict, dict]:
             "forms": [],
             "links": [],
             "network_requests": network_requests,
+            "page_title": None,
+            "asset_same_origin_count": 0,
+            "asset_cross_origin_count": 0,
+            "asset_dominant_foreign_origin": None,
+            "response_headers": {},
+            "server_ip": None,
         }
         return _for_llm(full), full
     finally:
