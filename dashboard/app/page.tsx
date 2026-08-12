@@ -83,6 +83,12 @@ function meterColor(sev: Severity): string {
   return 'var(--muted)'
 }
 
+function scoreColor(score: number): string {
+  if (score >= 80) return 'var(--green)'
+  if (score >= 50) return 'var(--yellow)'
+  return 'var(--red)'
+}
+
 function relativeTime(seconds: number): string {
   const diff = Date.now() - seconds * 1000
   const mins = Math.floor(diff / 60000)
@@ -121,13 +127,64 @@ function Badge({ verdict }: { verdict: Severity }) {
 
 function SectionTitle({ eyebrow, title, children }: { eyebrow: string; title: string; children?: React.ReactNode }) {
   return (
-    <div className="section-title">
+    <div className="section-title animate-in">
       <div>
         <p className="eyebrow">{eyebrow}</p>
         <h1>{title}</h1>
       </div>
       {children}
     </div>
+  )
+}
+
+/* ─── SVG Score Gauge ──────────────────────────────────────────────── */
+function ScoreGauge({ score, size = 100 }: { score: number; size?: number }) {
+  const radius = (size - 16) / 2
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference - (score / 100) * circumference
+  const color = scoreColor(score)
+
+  return (
+    <div className="score-ring-wrap" style={{ width: size, height: size }}>
+      <svg viewBox={`0 0 ${size} ${size}`}>
+        <circle
+          className="ring-track"
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+        />
+        <circle
+          className="ring-fill"
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color}
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          style={{
+            '--score-circumference': circumference,
+            '--score-offset': offset,
+          } as React.CSSProperties}
+        />
+      </svg>
+      <div className="score-ring-label">
+        <strong>{score}</strong>
+        <span>/100</span>
+      </div>
+    </div>
+  )
+}
+
+/* ─── Score Mini Bar (inline in tables) ────────────────────────────── */
+function ScoreMiniBar({ score }: { score: number }) {
+  const color = scoreColor(score)
+  return (
+    <span className="score-visual">
+      <span className="score-mini-bar">
+        <span className="score-mini-fill" style={{ width: `${score}%`, background: color }} />
+      </span>
+      <span className="score">{score}</span>
+    </span>
   )
 }
 
@@ -340,7 +397,7 @@ function RunTable({
                   <Badge verdict={run.verdict} />
                 </td>
                 <td>
-                  <span className="score">{run.score}</span>
+                  <ScoreMiniBar score={run.score} />
                 </td>
                 <td className="time-cell">{run.time}</td>
                 <td>
@@ -388,13 +445,21 @@ function Overview({ onNavigate, onSelect }: { onNavigate: (v: View) => void; onS
         </button>
       </SectionTitle>
       <div className="metric-grid">
-        <Metric label="Scans completed" value={loading ? '—' : String(stats.total)} icon={Activity} />
-        <Metric label="Threats detected" value={loading ? '—' : String(stats.dangerous)} icon={AlertTriangle} accent="danger" />
-        <Metric label="Suspicious" value={loading ? '—' : String(stats.suspicious)} icon={CircleHelp} accent="blue" />
-        <Metric label="Safe verdicts" value={loading ? '—' : `${stats.safePct}%`} icon={ShieldCheck} accent="green" />
+        <div className="animate-in animate-in-delay-1">
+          <Metric label="Scans completed" value={loading ? '—' : String(stats.total)} icon={Activity} />
+        </div>
+        <div className="animate-in animate-in-delay-2">
+          <Metric label="Threats detected" value={loading ? '—' : String(stats.dangerous)} icon={AlertTriangle} accent="danger" />
+        </div>
+        <div className="animate-in animate-in-delay-3">
+          <Metric label="Suspicious" value={loading ? '—' : String(stats.suspicious)} icon={CircleHelp} accent="blue" />
+        </div>
+        <div className="animate-in animate-in-delay-4">
+          <Metric label="Safe verdicts" value={loading ? '—' : `${stats.safePct}%`} icon={ShieldCheck} accent="green" />
+        </div>
       </div>
       <div className="overview-grid">
-        <section className="panel posture-panel">
+        <section className="panel posture-panel animate-in animate-in-delay-2">
           <div className="panel-header">
             <div>
               <p className="eyebrow">Risk distribution</p>
@@ -402,10 +467,7 @@ function Overview({ onNavigate, onSelect }: { onNavigate: (v: View) => void; onS
             </div>
           </div>
           <div className="posture-score">
-            <div className="score-ring">
-              <strong>{postureScore}</strong>
-              <span>/100</span>
-            </div>
+            <ScoreGauge score={postureScore} />
             <div>
               <Badge verdict={postureBadge} />
               <p>{postureScore >= 85 ? 'Strong security posture' : 'Elevated threat activity'}</p>
@@ -418,7 +480,7 @@ function Overview({ onNavigate, onSelect }: { onNavigate: (v: View) => void; onS
             <Risk label="High / Critical" count={stats.dangerous} total={stats.total} color="red" />
           </div>
         </section>
-        <section className="panel activity-panel">
+        <section className="panel activity-panel animate-in animate-in-delay-3">
           <div className="panel-header">
             <div>
               <p className="eyebrow">Detection activity</p>
@@ -447,7 +509,7 @@ function Overview({ onNavigate, onSelect }: { onNavigate: (v: View) => void; onS
           )}
         </section>
       </div>
-      <section className="panel runs-panel">
+      <section className="panel runs-panel animate-in animate-in-delay-4">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Latest activity</p>
@@ -500,15 +562,18 @@ function Metric({ label, value, icon: Icon, accent = '' }: { label: string; valu
 }
 
 function Risk({ label, count, total, color }: { label: string; count: number; total: number; color: string }) {
-  const pct = total ? `${Math.round((count / total) * 100)}%` : '0%'
+  const pct = total ? Math.round((count / total) * 100) : 0
   return (
     <div className="risk-row">
       <div>
         <span className={`risk-dot ${color}`} />
         {label}
+        <div className="risk-bar-track" style={{ width: '80px' }}>
+          <div className={`risk-bar-fill ${color}`} style={{ width: `${pct}%` }} />
+        </div>
       </div>
       <strong>{count}</strong>
-      <span className="risk-percent">{pct}</span>
+      <span className="risk-percent">{pct}%</span>
     </div>
   )
 }
@@ -526,7 +591,7 @@ function SignalCoverage({ isLink }: { isLink: boolean }) {
         ['Intent', 'Language and urgency'],
       ]
   return (
-    <section className="panel info-panel">
+    <section className="panel info-panel animate-in animate-in-delay-2">
       <p className="eyebrow">What we inspect</p>
       <h2>Signal coverage</h2>
       {rows.map(([title, text], i) => (
@@ -618,7 +683,7 @@ function LinkScan({ onSelect }: { onSelect: (r: Run) => void }) {
         </span>
       </SectionTitle>
       <div className="scan-layout">
-        <section className="panel scan-card">
+        <section className="panel scan-card animate-in">
           <div className="scan-icon">
             <Link2 size={22} />
           </div>
@@ -680,7 +745,7 @@ function LinkScan({ onSelect }: { onSelect: (r: Run) => void }) {
         </section>
         <SignalCoverage isLink />
       </div>
-      <section className="panel runs-panel">
+      <section className="panel runs-panel animate-in animate-in-delay-2">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Past link scans</p>
@@ -732,7 +797,7 @@ function EmailScan({ onSelect }: { onSelect: (r: Run) => void }) {
         </span>
       </SectionTitle>
       <div className="scan-layout">
-        <section className="panel scan-card">
+        <section className="panel scan-card animate-in">
           <div className="scan-icon">
             <Mail size={22} />
           </div>
@@ -782,7 +847,7 @@ function EmailScan({ onSelect }: { onSelect: (r: Run) => void }) {
         </section>
         <SignalCoverage isLink={false} />
       </div>
-      <section className="panel runs-panel">
+      <section className="panel runs-panel animate-in animate-in-delay-2">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Past email scans</p>
@@ -798,14 +863,23 @@ function EmailScan({ onSelect }: { onSelect: (r: Run) => void }) {
 function Anomalies({ onSelect }: { onSelect: (r: Run) => void }) {
   const { runs, error } = useRuns('/runs?view=anomaly&limit=100')
   const loading = runs === null && !error
-  const rows = (runs ?? []).map(runFromSummary)
+  const allRows = (runs ?? []).map(runFromSummary)
+
+  const [verdictFilter, setVerdictFilter] = useState<'All' | Severity>('All')
+
+  const rows = useMemo(() => {
+    if (verdictFilter === 'All') return allRows
+    return allRows.filter((r) => r.verdict === verdictFilter)
+  }, [allRows, verdictFilter])
+
+  const verdictOptions: ('All' | Severity)[] = ['All', 'Critical', 'Medium', 'Low', 'Safe']
 
   return (
     <>
       <SectionTitle eyebrow="Detection queue / network flows" title="Anomalies">
         <span className="anomaly-count">
           <span className="pulse danger-pulse" />
-          {loading ? '—' : `${rows.length} flagged flow${rows.length === 1 ? '' : 's'}`}
+          {loading ? '—' : `${allRows.length} flagged flow${allRows.length === 1 ? '' : 's'}`}
         </span>
       </SectionTitle>
       <div className="alert-banner">
@@ -818,16 +892,26 @@ function Anomalies({ onSelect }: { onSelect: (r: Run) => void }) {
           Acknowledge all
         </button>
       </div>
-      <section className="panel">
+      <section className="panel animate-in">
         <div className="panel-header">
           <div>
             <p className="eyebrow">Priority queue</p>
             <h2>Signals requiring review</h2>
           </div>
-          <button className="text-button" disabled>
-            <SlidersHorizontal size={14} />
-            Filter
-          </button>
+        </div>
+        <div className="toolbar">
+          <div className="filter-bar">
+            <span className="filter-label">Verdict</span>
+            {verdictOptions.map((opt) => (
+              <button
+                key={opt}
+                className={`filter-chip ${verdictFilter === opt ? 'active' : ''}`}
+                onClick={() => setVerdictFilter(opt)}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
         </div>
         <RunTable runs={rows} onSelect={onSelect} loading={loading} error={error} />
       </section>
@@ -840,11 +924,33 @@ function History({ onSelect }: { onSelect: (r: Run) => void }) {
   const { runs, error } = useRuns('/runs?limit=200')
   const loading = runs === null && !error
 
+  const [typeFilter, setTypeFilter] = useState<'All' | Kind>('All')
+  const [verdictFilter, setVerdictFilter] = useState<'All' | Severity>('All')
+
   const rows = useMemo(() => (runs ?? []).map(runFromSummary), [runs])
-  const filtered = useMemo(
-    () => rows.filter((run) => `${run.target} ${run.kind} ${run.verdict} ${run.id}`.toLowerCase().includes(query.toLowerCase())),
-    [rows, query],
-  )
+  const filtered = useMemo(() => {
+    let result = rows
+
+    // Text search
+    if (query) {
+      const q = query.toLowerCase()
+      result = result.filter((run) =>
+        `${run.target} ${run.kind} ${run.verdict} ${run.id}`.toLowerCase().includes(q),
+      )
+    }
+
+    // Type filter
+    if (typeFilter !== 'All') {
+      result = result.filter((run) => run.kind === typeFilter)
+    }
+
+    // Verdict filter
+    if (verdictFilter !== 'All') {
+      result = result.filter((run) => run.verdict === verdictFilter)
+    }
+
+    return result
+  }, [rows, query, typeFilter, verdictFilter])
 
   function exportCsv() {
     const header = ['id', 'target', 'type', 'verdict', 'score', 'time']
@@ -860,6 +966,9 @@ function History({ onSelect }: { onSelect: (r: Run) => void }) {
     URL.revokeObjectURL(url)
   }
 
+  const typeOptions: ('All' | Kind)[] = ['All', 'Link', 'Email', 'Network']
+  const verdictOptions: ('All' | Severity)[] = ['All', 'Critical', 'Medium', 'Low', 'Safe']
+
   return (
     <>
       <SectionTitle eyebrow="Audit trail / all activity" title="Scan history">
@@ -868,16 +977,40 @@ function History({ onSelect }: { onSelect: (r: Run) => void }) {
           Export CSV
         </button>
       </SectionTitle>
-      <section className="panel history-panel">
+      <section className="panel history-panel animate-in">
         <div className="toolbar">
           <div className="search-box">
             <Search size={16} />
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search targets, run IDs…" />
           </div>
-          <button className="button secondary" disabled>
-            <SlidersHorizontal size={15} />
-            Filters
-          </button>
+        </div>
+        <div className="toolbar" style={{ marginBottom: 16 }}>
+          <div className="filter-bar">
+            <span className="filter-label">Type</span>
+            {typeOptions.map((opt) => (
+              <button
+                key={opt}
+                className={`filter-chip ${typeFilter === opt ? 'active' : ''}`}
+                onClick={() => setTypeFilter(opt)}
+              >
+                {opt === 'Link' && <Link2 size={12} />}
+                {opt === 'Email' && <Mail size={12} />}
+                {opt === 'Network' && <Network size={12} />}
+                {opt}
+              </button>
+            ))}
+            <span className="filter-separator" />
+            <span className="filter-label">Verdict</span>
+            {verdictOptions.map((opt) => (
+              <button
+                key={opt}
+                className={`filter-chip ${verdictFilter === opt ? 'active' : ''}`}
+                onClick={() => setVerdictFilter(opt)}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
         </div>
         <RunTable runs={filtered} onSelect={onSelect} loading={loading} error={error} />
       </section>
@@ -923,7 +1056,7 @@ function SettingsView() {
         </button>
       </SectionTitle>
       <div className="settings-grid">
-        <section className="panel settings-card">
+        <section className="panel settings-card animate-in">
           <p className="eyebrow">Backend connection</p>
           <h2>FastAPI engine</h2>
           <p className="muted">Configure the analysis service that powers Security Copilot. No authentication is required (POC scope).</p>

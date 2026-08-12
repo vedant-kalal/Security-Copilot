@@ -46,6 +46,19 @@ function severityFromLabel(label?: VerdictLabel | string): Severity {
   }
 }
 
+function scoreColor(score: number): string {
+  if (score >= 80) return 'var(--green)'
+  if (score >= 50) return 'var(--yellow)'
+  return 'var(--red)'
+}
+
+function meterColor(sev: Severity): string {
+  if (sev === 'Critical' || sev === 'High') return 'var(--red)'
+  if (sev === 'Medium') return 'var(--yellow)'
+  if (sev === 'Safe') return 'var(--green)'
+  return 'var(--muted)'
+}
+
 function errorMessage(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Something went wrong. Try again.'
 }
@@ -66,7 +79,7 @@ function relativeTime(seconds: number): string {
 // GET /screenshots/<basename> or /reports/<basename> (api/app.py), so only
 // the basename is needed once turned into a URL.
 function fileUrl(mount: 'screenshots' | 'reports', path: string): string {
-  return `${getApiBaseUrl()}/${mount}/${path.split('/').pop()}`
+  return `${getApiBaseUrl()}/${mount}/${path.split(/[/\\]/).pop()}`
 }
 
 // inspect_website's navigation_error is a raw Playwright/Python exception
@@ -127,6 +140,44 @@ function ReasonText({ text }: { text: string }) {
           block.lines.map((line, j) => <p key={`${i}-${j}`}>{renderInline(line)}</p>)
         ),
       )}
+    </div>
+  )
+}
+
+/* ─── SVG Score Gauge ──────────────────────────────────────────────── */
+function ScoreGauge({ score, size = 100 }: { score: number; size?: number }) {
+  const radius = (size - 16) / 2
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference - (score / 100) * circumference
+  const color = scoreColor(score)
+
+  return (
+    <div className="score-ring-wrap" style={{ width: size, height: size }}>
+      <svg viewBox={`0 0 ${size} ${size}`}>
+        <circle
+          className="ring-track"
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+        />
+        <circle
+          className="ring-fill"
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          stroke={color}
+          strokeDasharray={circumference}
+          strokeDashoffset={offset}
+          style={{
+            '--score-circumference': circumference,
+            '--score-offset': offset,
+          } as React.CSSProperties}
+        />
+      </svg>
+      <div className="score-ring-label">
+        <strong>{score}</strong>
+        <span>/100</span>
+      </div>
     </div>
   )
 }
@@ -204,16 +255,13 @@ function RunReport({ detail }: { detail: RunDetail }) {
   return (
     <div className="run-body">
       {/* ── Summary, up top ─────────────────────────────────── */}
-      <section className="panel run-summary">
+      <section className="panel run-summary animate-in">
         <p className="eyebrow">Investigation / {detail.id}</p>
         <h1 className="run-target">{detail.raw_input}</h1>
         <div className="modal-meta">
           <span className={`badge ${verdictClass[sev]}`}>
             <span className="badge-dot" />
             {sev}
-          </span>
-          <span>
-            Risk score <strong>{score}/100</strong>
           </span>
           <span>{relativeTime(detail.created_at)}</span>
           {detail.report_path && (
@@ -223,6 +271,19 @@ function RunReport({ detail }: { detail: RunDetail }) {
             </a>
           )}
           {detail.case_type === 'link' && <ReportBlockButton url={detail.raw_input} />}
+        </div>
+        {/* ── Visual score gauge ───────────────────────────────── */}
+        <div className="run-score-gauge">
+          <ScoreGauge score={score} size={72} />
+          <div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <strong style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-.04em' }}>{score}</strong>
+              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--muted)' }}>/ 100 risk score</span>
+            </div>
+            <div className="score-mini-bar" style={{ width: 200, height: 6, marginTop: 8 }}>
+              <span className="score-mini-fill" style={{ width: `${score}%`, background: meterColor(sev) }} />
+            </div>
+          </div>
         </div>
         <div className="detail-box run-reason">
           <Sparkles size={17} />
@@ -249,7 +310,7 @@ function RunReport({ detail }: { detail: RunDetail }) {
 
       {/* ── What the sandbox actually saw on each page it visited ── */}
       {inspectCalls.length > 0 && (
-        <section className="panel">
+        <section className="panel animate-in animate-in-delay-1">
           {inspectCalls.map((call, i) => (
             <PageInspection key={i} call={call} index={i} total={inspectCalls.length} />
           ))}
@@ -267,10 +328,10 @@ function RunReport({ detail }: { detail: RunDetail }) {
       ))}
 
       {detail.tool_calls.length === 0 && (
-        <section className="panel">
+        <section className="panel animate-in animate-in-delay-1">
           <p className="eyebrow">Investigation steps</p>
           <p className="muted">
-            This verdict was served from the router's fast path (a static blocklist match, or a cached result from
+            This verdict was served from the router&apos;s fast path (a static blocklist match, or a cached result from
             an earlier check of this exact target) — no fresh tool calls ran for this specific entry.
           </p>
         </section>
@@ -419,9 +480,10 @@ function VirusTotalPanel({ call }: { call: RunDetail['tool_calls'][number] }) {
   const malicious = vt.malicious_count ?? 0
   const suspicious = vt.suspicious_count ?? 0
   const harmless = vt.harmless_count ?? 0
+  const vtTotal = malicious + suspicious + harmless
 
   return (
-    <section className="panel vt-block">
+    <section className="panel vt-block animate-in animate-in-delay-2">
       <p className="eyebrow">VirusTotal{domain ? ` · ${domain}` : ''}</p>
       <p className="muted">
         {malicious + suspicious === 0
@@ -430,6 +492,29 @@ function VirusTotalPanel({ call }: { call: RunDetail['tool_calls'][number] }) {
               malicious > 0 ? 'malicious' : 'suspicious'
             }${harmless > 0 ? `, while ${harmless} call it harmless` : ''}.`}
       </p>
+      {/* ── Visual proportion bar ──────────────────────────────── */}
+      {vtTotal > 0 && (
+        <div className="vt-proportion-bar">
+          {malicious > 0 && (
+            <span
+              className="vt-proportion-seg malicious"
+              style={{ width: `${(malicious / vtTotal) * 100}%` }}
+            />
+          )}
+          {suspicious > 0 && (
+            <span
+              className="vt-proportion-seg suspicious"
+              style={{ width: `${(suspicious / vtTotal) * 100}%` }}
+            />
+          )}
+          {harmless > 0 && (
+            <span
+              className="vt-proportion-seg harmless"
+              style={{ width: `${(harmless / vtTotal) * 100}%` }}
+            />
+          )}
+        </div>
+      )}
       <div className="vt-counts">
         <span className="vt-count malicious">{malicious} malicious</span>
         <span className="vt-count suspicious">{suspicious} suspicious</span>
@@ -474,7 +559,7 @@ function SimilarCasesPanel({ call }: { call: RunDetail['tool_calls'][number] }) 
   const matches = call.artifact.matches ?? []
 
   return (
-    <section className="panel vt-block similar-cases-block">
+    <section className="panel vt-block similar-cases-block animate-in animate-in-delay-3">
       <p className="eyebrow case-match-eyebrow">
         <History size={12} />
         Similar past investigations
