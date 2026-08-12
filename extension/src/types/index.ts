@@ -60,6 +60,19 @@ export interface QuickCheckResponse {
   detail?: string;
 }
 
+/** POST /quick-check-email response (api/routes_quick_check_email.py) —
+ * a single BERT text-classification pass, no agent loop, no links
+ * investigated. What the popup runs automatically the instant it opens
+ * on a recognized webmail tab (see lib/webmail.ts); "Run full scan"
+ * escalates to the real agent via RUN_FULL_EMAIL_CHECK below, which does
+ * investigate every link. */
+export interface QuickCheckEmailResponse {
+  label: "dangerous" | "suspicious" | "safe" | "unknown";
+  confidence: number;
+  source: "ml_model" | "error";
+  detail?: string;
+}
+
 /** Messages passed between background.ts (which owns navigation events and
  * the backend calls) and content.ts (which owns the in-page banner). */
 export type BackgroundToContentMessage =
@@ -87,6 +100,19 @@ export type ContentToBackgroundMessage =
   // extension page, not injected into the tab), so it has to say which
   // tab explicitly.
   | { type: "RUN_FULL_CHECK"; url: string; tabId?: number }
+  // From the popup — either the automatic webmail quick-check's "Run full
+  // scan" button, or the general-purpose "Check page text" button (any
+  // page, not just recognized webmail). `links` are real anchor hrefs
+  // already extracted from the DOM (see Popup.tsx's extractPageContent) —
+  // the same union-with-regex-extraction the backend does for a plain
+  // pasted email applies here too, but DOM hrefs catch "click here"-style
+  // links a text-only regex never could. `pageUrl` is the tab's URL at
+  // the time of the check — reused as the TabVerdict/PendingFullCheck key
+  // (see storage.ts) so reopening the popup on the same page restores the
+  // result exactly the way a link check's does, and always sent
+  // explicitly since this message only ever comes from the popup, which
+  // has no sender.tab of its own to fall back on.
+  | { type: "RUN_FULL_EMAIL_CHECK"; text: string; links: string[]; pageUrl: string; tabId?: number }
   // Sent only when the content script finds a password field inside a
   // form whose action posts to a different site than the page itself —
   // see content/index.ts's computePageSignals(). Not sent otherwise, so

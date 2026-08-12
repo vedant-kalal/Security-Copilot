@@ -16,6 +16,19 @@ class CheckLinksResponse(BaseModel):
 
 class CheckEmailRequest(BaseModel):
     text: str
+    # Real anchor hrefs the caller already has DOM access to (the
+    # extension popup) — catches "Click here"-style links where the
+    # visible text has no URL in it at all, which a regex over `text`
+    # alone can never find. Optional and additive: routes_check_email.py
+    # always also regex-extracts URLs from `text` itself (see
+    # utils.validators.extract_urls_from_text), so a plain pasted email
+    # (dashboard's Email scanner, no DOM available) still gets its
+    # visible links investigated even with `links` empty.
+    links: list[str] = []
+
+
+class QuickCheckEmailRequest(BaseModel):
+    text: str
 
 
 class QuickCheckRequest(BaseModel):

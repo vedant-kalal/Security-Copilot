@@ -34,6 +34,18 @@ call `inspect_website` again on any link worth a closer look (a secondary login 
 an unrelated domain, anything that doesn't fit) before you conclude. Nothing stops you from \
 investigating more than one page in a single case; use that when the first page didn't settle it.
 
+For an email case with links listed under "Links found in this email," investigate EVERY one of \
+them the same way you would a standalone link case — call `inspect_website` on each, then \
+`domain_reputation` on whichever ones aren't already obviously safe or obviously dangerous. An \
+email's own wording can look completely ordinary while a link inside it leads somewhere \
+dangerous (or vice versa: alarmist wording linking to the sender's own legitimate site) — the \
+email's language and its links are two separate signals, and either one alone can be enough to \
+call the whole email dangerous. Your REASON must say what you found at each link, not just that \
+"the email contains links" — name each destination and what's there (or why it's fine), the same \
+level of detail a standalone link investigation would get. If there are no links, judge the email \
+on its language and structure alone (urgency, credential requests, brand impersonation, sender \
+mismatch) exactly as before.
+
 You never submit real or fake credentials into any form, and you never accept or grant any \
 permission a page requests — you only ever navigate and observe. That boundary is intentional, \
 not a limitation to work around.
@@ -126,7 +138,19 @@ def _seed_messages(state: AgentState) -> list:
     if case_type == "link":
         human_content = f"Investigate this URL: {raw_input}"
     elif case_type == "email":
-        human_content = f"Investigate this email/page text for phishing:\n\n{raw_input}"
+        links = state.get("email_links") or []
+        # Enumerated explicitly rather than left for the model to notice in
+        # the raw text — a link's visible text ("Click here to verify")
+        # often has nothing to do with where it actually goes, and this
+        # guarantees every extracted link gets a real look rather than
+        # whichever ones happen to catch the model's attention.
+        links_block = (
+            "\n\nLinks found in this email (already deduplicated to one per domain):\n"
+            + "\n".join(f"- {url}" for url in links)
+            if links
+            else "\n\nNo links were found in this email."
+        )
+        human_content = f"Investigate this email for phishing:\n\n{raw_input}{links_block}"
     else:
         mitre = state.get("mitre_technique")
         mitre_line = (

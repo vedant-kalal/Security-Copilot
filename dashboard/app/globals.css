@@ -777,8 +777,14 @@ button { cursor: pointer; border: none; background: none; }
 .bar-stack:nth-child(11) { animation-delay: 300ms; }
 .bar-stack:nth-child(12) { animation-delay: 330ms; }
 .bar-seg { display: block; width: 100%; }
-.bar-seg.threat { background: var(--red); }
-.bar-seg.safe { background: var(--blue); }
+/* Softened tints rather than the raw, fully-saturated tokens — a solid
+   block of --red/--blue read as harsh against the muted chart background. */
+.bar-seg.threat {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--red) 75%, transparent), color-mix(in srgb, var(--red) 55%, transparent));
+}
+.bar-seg.safe {
+  background: linear-gradient(180deg, color-mix(in srgb, var(--blue) 65%, transparent), color-mix(in srgb, var(--blue) 45%, transparent));
+}
 .chart-empty {
   height: 180px;
   display: grid;
@@ -842,8 +848,8 @@ td:first-child strong {
   gap: 10px;
 }
 .score-mini-bar {
-  width: 48px;
-  height: 4px;
+  width: 60px;
+  height: 5px;
   border-radius: 4px;
   background: var(--soft);
   overflow: hidden;
@@ -860,7 +866,9 @@ td:first-child strong {
 .scan-layout, .settings-grid {
   display: grid;
   grid-template-columns: 1.35fr .75fr;
+  align-items: start;
   gap: 16px;
+  margin-bottom: 24px;
 }
 .scan-card { padding: 28px; }
 .scan-icon {
@@ -878,6 +886,7 @@ td:first-child strong {
   font-size: 13px;
   line-height: 1.65;
   max-width: 560px;
+  overflow-wrap: anywhere;
 }
 
 /* ─── Input / Forms ────────────────────────────────────────────────── */
@@ -1348,17 +1357,34 @@ td:first-child strong {
 .run-no-screenshot { color: var(--muted); }
 .run-subhead { margin-top: 20px; }
 
-/* ─── Score Gauge (Run Detail) ─────────────────────────────────────── */
-.run-score-gauge {
+/* ─── Score Bar (Run Detail) ───────────────────────────────────────── */
+/* Deliberately a bar, not a circular gauge — a ring reads as a "percent
+   complete" metaphor, which this score isn't; a bar next to the number
+   reads unambiguously as a severity meter (same idea as ScoreMiniBar in
+   the tables — see page.tsx's comment on why the color is
+   classification-based, not magnitude-based). */
+.run-score-bar { margin-top: 12px; }
+.run-score-bar-head {
   display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-top: 8px;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 10px;
 }
-.run-score-gauge .score-mini-bar {
+.run-score-bar-head strong {
+  font-size: 32px;
+  font-weight: 700;
+  letter-spacing: -.04em;
+  line-height: 1;
+}
+.run-score-bar-head span {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--muted);
+}
+.run-score-bar-track {
   width: 100%;
-  max-width: 200px;
-  height: 6px;
+  max-width: 320px;
+  height: 8px;
 }
 
 /* ─── Inspection ───────────────────────────────────────────────────── */
@@ -1373,7 +1399,7 @@ td:first-child strong {
   color: var(--muted);
   line-height: 1.55;
 }
-.inspection-facts li { padding-left: 16px; position: relative; }
+.inspection-facts li { padding-left: 16px; position: relative; overflow-wrap: anywhere; }
 .inspection-facts li:before {
   content: '';
   position: absolute;

@@ -28,7 +28,9 @@ import {
   Moon,
   X,
 } from 'lucide-react'
+import { ScoreBar } from '@/components/ScoreBar'
 import { ApiError, apiGet, apiPost, apiPostStream, getApiBaseUrl, setApiBaseUrl } from '@/lib/api'
+import { useTheme } from '@/lib/theme'
 import type { RunSummary, VerdictLabel } from '@/lib/types'
 
 type View = 'Overview' | 'Link scans' | 'Email scans' | 'Anomalies' | 'History' | 'Settings'
@@ -176,13 +178,15 @@ function ScoreGauge({ score, size = 100 }: { score: number; size?: number }) {
 }
 
 /* ─── Score Mini Bar (inline in tables) ────────────────────────────── */
-function ScoreMiniBar({ score }: { score: number }) {
-  const color = scoreColor(score)
+// Colored by verdict classification, not by the raw score magnitude — the
+// score here is verdict *confidence* (0-100), not a safety percentage, so
+// a high score on a dangerous/critical verdict is still dangerous. Only
+// the Overview page's posture gauge (a genuine safe%, see postureScore
+// below) uses magnitude-based scoreColor.
+function ScoreMiniBar({ score, sev }: { score: number; sev: Severity }) {
   return (
     <span className="score-visual">
-      <span className="score-mini-bar">
-        <span className="score-mini-fill" style={{ width: `${score}%`, background: color }} />
-      </span>
+      <ScoreBar score={score} color={meterColor(sev)} />
       <span className="score">{score}</span>
     </span>
   )
@@ -191,7 +195,7 @@ function ScoreMiniBar({ score }: { score: number }) {
 export default function Page() {
   const router = useRouter()
   const [view, setView] = useState<View>('Overview')
-  const [dark, setDark] = useState(true)
+  const { dark, toggleTheme } = useTheme()
   const [mobileNav, setMobileNav] = useState(false)
 
   // Every run now opens its own full page (dashboard/app/run/[id]/page.tsx)
@@ -218,7 +222,7 @@ export default function Page() {
   }
 
   return (
-    <div className={dark ? 'app-shell dark' : 'app-shell'}>
+    <div className={dark ? 'app-shell dark' : 'app-shell'} suppressHydrationWarning>
       <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
         <div className="brand">
           <div className="brand-mark">
@@ -280,7 +284,7 @@ export default function Page() {
             <strong>{view}</strong>
           </div>
           <div className="top-actions">
-            <button className="icon-button" onClick={() => setDark(!dark)} aria-label="Toggle theme">
+            <button className="icon-button" onClick={toggleTheme} aria-label="Toggle theme">
               {dark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
             <div className="live-indicator">
@@ -397,7 +401,7 @@ function RunTable({
                   <Badge verdict={run.verdict} />
                 </td>
                 <td>
-                  <ScoreMiniBar score={run.score} />
+                  <ScoreMiniBar score={run.score} sev={run.verdict} />
                 </td>
                 <td className="time-cell">{run.time}</td>
                 <td>

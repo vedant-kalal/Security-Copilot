@@ -17,7 +17,10 @@ import {
   Sparkles,
   Sun,
 } from 'lucide-react'
+import { ScoreBar } from '@/components/ScoreBar'
 import { ApiError, apiGet, apiPost, getApiBaseUrl } from '@/lib/api'
+import { generateRunReportPdf } from '@/lib/pdfReport'
+import { useTheme } from '@/lib/theme'
 import type { ReportResponse, RunDetail, VerdictLabel } from '@/lib/types'
 
 type Severity = 'Critical' | 'High' | 'Medium' | 'Low' | 'Safe' | 'Unknown'
@@ -46,12 +49,6 @@ function severityFromLabel(label?: VerdictLabel | string): Severity {
   }
 }
 
-function scoreColor(score: number): string {
-  if (score >= 80) return 'var(--green)'
-  if (score >= 50) return 'var(--yellow)'
-  return 'var(--red)'
-}
-
 function meterColor(sev: Severity): string {
   if (sev === 'Critical' || sev === 'High') return 'var(--red)'
   if (sev === 'Medium') return 'var(--yellow)'
@@ -74,11 +71,13 @@ function relativeTime(seconds: number): string {
   return `${days} day${days > 1 ? 's' : ''} ago`
 }
 
-// screenshot_path / report_path are repo-relative file paths (e.g.
-// "data/screenshots/foo.png") — the backend serves the file itself at
-// GET /screenshots/<basename> or /reports/<basename> (api/app.py), so only
-// the basename is needed once turned into a URL.
-function fileUrl(mount: 'screenshots' | 'reports', path: string): string {
+// screenshot_path is a repo-relative file path (e.g. "data/screenshots/foo.png")
+// — the backend serves the file itself at GET /screenshots/<basename>
+// (api/app.py), so only the basename is needed once turned into a URL.
+// (The old .md report download used the equivalent /reports/<basename>
+// mount — no longer needed now that the report is a client-built PDF,
+// see lib/pdfReport.ts.)
+function fileUrl(mount: 'screenshots', path: string): string {
   return `${getApiBaseUrl()}/${mount}/${path.split(/[/\\]/).pop()}`
 }
 
@@ -144,48 +143,10 @@ function ReasonText({ text }: { text: string }) {
   )
 }
 
-/* ─── SVG Score Gauge ──────────────────────────────────────────────── */
-function ScoreGauge({ score, size = 100 }: { score: number; size?: number }) {
-  const radius = (size - 16) / 2
-  const circumference = 2 * Math.PI * radius
-  const offset = circumference - (score / 100) * circumference
-  const color = scoreColor(score)
-
-  return (
-    <div className="score-ring-wrap" style={{ width: size, height: size }}>
-      <svg viewBox={`0 0 ${size} ${size}`}>
-        <circle
-          className="ring-track"
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-        />
-        <circle
-          className="ring-fill"
-          cx={size / 2}
-          cy={size / 2}
-          r={radius}
-          stroke={color}
-          strokeDasharray={circumference}
-          strokeDashoffset={offset}
-          style={{
-            '--score-circumference': circumference,
-            '--score-offset': offset,
-          } as React.CSSProperties}
-        />
-      </svg>
-      <div className="score-ring-label">
-        <strong>{score}</strong>
-        <span>/100</span>
-      </div>
-    </div>
-  )
-}
-
 export default function RunPage() {
   const params = useParams<{ id: string }>()
   const router = useRouter()
-  const [dark, setDark] = useState(true)
+  const { dark, toggleTheme } = useTheme()
   const [detail, setDetail] = useState<RunDetail | null>(null)
   const [error, setError] = useState<string | null>(null)
 
@@ -202,7 +163,7 @@ export default function RunPage() {
   }, [params.id])
 
   return (
-    <div className={dark ? 'app-shell dark' : 'app-shell'}>
+    <div className={dark ? 'app-shell dark' : 'app-shell'} suppressHydrationWarning>
       <div className="run-page">
         <header className="run-topbar">
           <button className="icon-button" onClick={() => router.push('/')} aria-label="Back to dashboard">
@@ -215,7 +176,7 @@ export default function RunPage() {
             <span>Security Copilot</span>
           </div>
           <div className="top-actions">
-            <button className="icon-button" onClick={() => setDark(!dark)} aria-label="Toggle theme">
+            <button className="icon-button" onClick={toggleTheme} aria-label="Toggle theme">
               {dark ? <Sun size={17} /> : <Moon size={17} />}
             </button>
           </div>
@@ -264,26 +225,17 @@ function RunReport({ detail }: { detail: RunDetail }) {
             {sev}
           </span>
           <span>{relativeTime(detail.created_at)}</span>
-          {detail.report_path && (
-            <a className="button secondary run-download" href={fileUrl('reports', detail.report_path)} download>
-              <Download size={14} />
-              Download report
-            </a>
-          )}
+          <DownloadReportButton detail={detail} />
           {detail.case_type === 'link' && <ReportBlockButton url={detail.raw_input} />}
         </div>
-        {/* ── Visual score gauge ───────────────────────────────── */}
-        <div className="run-score-gauge">
-          <ScoreGauge score={score} size={72} />
-          <div>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <strong style={{ fontSize: 28, fontWeight: 700, letterSpacing: '-.04em' }}>{score}</strong>
-              <span style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: 'var(--muted)' }}>/ 100 risk score</span>
-            </div>
-            <div className="score-mini-bar" style={{ width: 200, height: 6, marginTop: 8 }}>
-              <span className="score-mini-fill" style={{ width: `${score}%`, background: meterColor(sev) }} />
-            </div>
+        {/* ── Visual score bar — colored by verdict classification, not the ── */}
+        {/* raw number: this is confidence in the verdict, not a safety %. */}
+        <div className="run-score-bar">
+          <div className="run-score-bar-head">
+            <strong>{score}</strong>
+            <span>/ 100 risk score</span>
           </div>
+          <ScoreBar score={score} color={meterColor(sev)} className="run-score-bar-track" />
         </div>
         <div className="detail-box run-reason">
           <Sparkles size={17} />
@@ -337,6 +289,30 @@ function RunReport({ detail }: { detail: RunDetail }) {
         </section>
       )}
     </div>
+  )
+}
+
+// Builds a polished PDF client-side from the same `detail` already loaded
+// for this page (see lib/pdfReport.ts) — replaces the old link straight to
+// the backend's raw .md file, which wasn't something you'd want to hand
+// to someone outside the team.
+function DownloadReportButton({ detail }: { detail: RunDetail }) {
+  const [busy, setBusy] = useState(false)
+
+  async function handleClick() {
+    setBusy(true)
+    try {
+      await generateRunReportPdf(detail)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <button className="button secondary run-download" onClick={handleClick} disabled={busy}>
+      {busy ? <Loader2 size={14} className="spin" /> : <Download size={14} />}
+      {busy ? 'Preparing PDF…' : 'Download report'}
+    </button>
   )
 }
 

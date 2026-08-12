@@ -386,7 +386,7 @@ async function runFullCheck(tabId: number, url: string): Promise<void> {
   const pending = await getPendingFullCheck(tabId);
   if (pending && pending.url === url) return; // already running for this exact tab+URL — nothing to do
 
-  await setPendingFullCheck(tabId, { url, startedAt: Date.now() });
+  await setPendingFullCheck(tabId, { url, startedAt: Date.now(), kind: "link" });
   const stopKeepAlive = startKeepAlive();
   await sendToTab(tabId, { type: "FULL_CHECK_STARTED" });
   try {
@@ -444,6 +444,71 @@ async function runFullCheck(tabId: number, url: string): Promise<void> {
   }
 }
 
+// Same shape as runFullCheck above (same reliability need, sharper here:
+// a multi-link email costs one inspect_website + domain_reputation round
+// trip *per link*, so this can run well past the single-URL case's
+// already-long 40s — see routes_check_email_stream.py's docstring), just
+// pointed at /check-email-stream and reusing `pageUrl` (the webmail tab's
+// URL at the time of the check) as the dedupe/restore key in place of a
+// checked URL — there's no single "the URL" for an email the way there is
+// for a link case, but the tab's own URL serves the same purpose: Popup.tsx
+// already restores a cached TabVerdict whenever `checkedUrl === tab.url`,
+// which works unchanged for an email verdict this way.
+async function runFullEmailCheck(tabId: number, text: string, links: string[], pageUrl: string): Promise<void> {
+  const pending = await getPendingFullCheck(tabId);
+  if (pending && pending.url === pageUrl) return; // already running for this exact tab+page
+
+  await setPendingFullCheck(tabId, { url: pageUrl, startedAt: Date.now(), kind: "email" });
+  const stopKeepAlive = startKeepAlive();
+  await sendToTab(tabId, { type: "FULL_CHECK_STARTED" });
+  try {
+    const { apiBaseUrl, dashboardBaseUrl } = await getStorage();
+    const response = await fetch(`${apiBaseUrl}/check-email-stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, links }),
+    });
+    if (!response.ok || !response.body) {
+      throw new ApiError(response.status, `Full check failed (HTTP ${response.status}).`);
+    }
+
+    let final: Extract<CheckLinksStreamEvent, { type: "done" }> | null = null;
+    for await (const event of readSSE(response.body)) {
+      if (event.type === "progress") {
+        await updatePendingFullCheckStep(tabId, event.label);
+        await sendToTab(tabId, { type: "FULL_CHECK_PROGRESS", label: event.label });
+      } else {
+        final = event;
+      }
+    }
+    if (!final) throw new Error("Investigation stream ended without a result.");
+
+    const v = final.verdict;
+    await setBadge(tabId, v.label);
+    await setTabVerdict(tabId, {
+      checkedUrl: pageUrl,
+      kind: "email",
+      label: v.label,
+      confidence: v.confidence,
+      reason: v.reason,
+      mitigation: v.mitigation,
+      legitimateAlternatives: v.legitimate_alternatives,
+      runId: final.run_id,
+      checkedAt: Date.now(),
+    });
+    await clearPendingFullCheck(tabId);
+    await sendToTab(tabId, { type: "FULL_CHECK_DONE", runId: final.run_id, label: v.label, confidence: v.confidence });
+
+    chrome.tabs.create({ url: `${dashboardBaseUrl}/run/${final.run_id}` });
+  } catch (error) {
+    await clearPendingFullCheck(tabId);
+    const message = error instanceof ApiError ? error.message : "Full check failed.";
+    await sendToTab(tabId, { type: "FULL_CHECK_FAILED", message });
+  } finally {
+    stopKeepAlive();
+  }
+}
+
 chrome.runtime.onMessage.addListener((message: ContentToBackgroundMessage, sender) => {
   if (message.type === "RUN_FULL_CHECK") {
     // From the banner (content script), the tab is sender.tab; from the
@@ -451,6 +516,9 @@ chrome.runtime.onMessage.addListener((message: ContentToBackgroundMessage, sende
     // sender.tab at all, so it sends its own tabId explicitly instead.
     const tabId = sender.tab?.id ?? message.tabId;
     if (tabId !== undefined) void runFullCheck(tabId, message.url);
+  } else if (message.type === "RUN_FULL_EMAIL_CHECK") {
+    const tabId = sender.tab?.id ?? message.tabId;
+    if (tabId !== undefined) void runFullEmailCheck(tabId, message.text, message.links, message.pageUrl);
   } else if (message.type === "PAGE_SIGNALS" && sender.tab?.id !== undefined) {
     void handlePageSignals(sender.tab.id, message.url, message.actionDomain);
   } else if (message.type === "REFRESH_BLOCKLIST") {

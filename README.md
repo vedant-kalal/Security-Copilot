@@ -360,11 +360,16 @@ VirusTotal, WHOIS, DuckDuckGo, real phishing test sites) and, for the extension,
 
 **In progress:** multi-link email phishing investigation — extracting every link from an email (regex over the
 text, plus real DOM hrefs from the extension) and investigating each one the same way a standalone URL case
-would, instead of relying on the model to notice links in unstructured text. The backend pieces (extraction,
-dedup, the agent's per-link investigation prompt, a fast BERT-only `/quick-check-email`, a streaming
-`/check-email-stream`, and graceful degradation if the LLM provider is unavailable) are in place and the
-deterministic parts are directly tested; full agent-driven verification and the extension-side wiring (automatic
-popup quick-check on webmail tabs, the "Run full scan" flow) are not yet fully verified end-to-end.
+would, instead of relying on the model to notice links in unstructured text. The backend (extraction, dedup, the
+agent's per-link investigation prompt, a fast BERT-only `/quick-check-email`, a streaming `/check-email-stream`,
+and graceful degradation if the LLM provider is unavailable) and the extension's background-side plumbing
+(message handling, SSE consumption, session storage, badge updates — verified end-to-end via a loaded extension
+in a real browser, message to completed verdict) are built and tested. Two things remain unverified: real
+agent-driven investigation quality on a genuinely multi-link email (blocked at time of writing by the configured
+OpenRouter key being out of credits — degrades gracefully to an "unresolved" verdict rather than crashing, but
+that's not the same as seeing it actually reason about several links), and the popup's on-open DOM extraction on
+a real webmail tab specifically needs one manual click to confirm — it depends on Chrome's `activeTab` grant,
+which is tied to a genuine toolbar-icon click and isn't something browser automation can simulate.
 
 **Not built (by design):** per-user personalization — periodically retraining the network models on *your*
 logged traffic (excluding confirmed-malicious flows) instead of the public datasets. This is an ongoing task that

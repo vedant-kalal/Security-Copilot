@@ -37,3 +37,10 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     mitre_technique: Optional[dict]
     verdict: Optional[Verdict]
+    # case_type == "email" only — links found in the email (regex-extracted
+    # from the body text, plus real anchor hrefs when the caller has DOM
+    # access, e.g. the extension popup), already deduped to one URL per
+    # domain and capped (see utils.validators.dedupe_links_by_domain) so
+    # the agent's per-link investigation work stays bounded. None/empty for
+    # every other case type.
+    email_links: Optional[list[str]]

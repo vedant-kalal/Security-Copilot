@@ -71,3 +71,14 @@ class LLMRateLimitedError(RateLimitedError):
     """
 
     error_code = "llm_rate_limited"
+
+
+class LLMUnavailableError(ExternalServiceError):
+    """OpenRouter returned a terminal account-level error for this request —
+    HTTP 402 (out of credits) being the one actually seen in practice, but
+    this also covers 401/403 (a revoked/invalid key). None of these are
+    "try again in a second" like a 429 — the account needs attention — but
+    they deserve exactly the same treatment agent/graph.py already gives a
+    rate limit: a low-confidence "unresolved" verdict, not a bare 500."""
+
+    error_code = "llm_unavailable"
