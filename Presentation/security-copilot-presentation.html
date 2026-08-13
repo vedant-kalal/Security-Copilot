@@ -353,6 +353,8 @@ const SECTIONS = [
   {id:'results', label:'Detection Results'},
   {id:'business', label:'Business Impact'},
   {id:'limitations', label:'Limitations & Roadmap'},
+  {id:'feasibility', label:'Feasibility'},
+  {id:'pricing', label:'Business Plan'},
   {id:'close', label:'Takeaway'},
 ];
 
@@ -746,8 +748,106 @@ screenWrap(11, `
   </div>
 `);
 
-/* ---------- 13. CLOSE ---------- */
+/* ---------- 13. FEASIBILITY ---------- */
 screenWrap(12, `
+  <div class="eyebrow">12 · Feasibility</div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">Lean enough to run today, structured to grow</h1>
+  <h2 class="sub">Cost, scale, and who it's for — the same design choice that keeps detection fast is what keeps
+  it affordable and shippable.</h2>
+  <div class="grid g3" style="margin-top:22px;">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px;">Cost</div>
+      <ul style="padding-left:18px; font-size:13px; line-height:1.9; color:var(--text);">
+        <li>Most checks never touch a paid API — the ONNX URL model and BERT text model run locally, at zero
+        marginal cost</li>
+        <li>An LLM call (OpenRouter) only happens on escalation; the router's blocklist + 24h cache exist
+        specifically to keep that spend rare</li>
+        <li>VirusTotal's free tier plus a local SQLite history — no hosted database or paid infra needed to run
+        it today</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px;">Scalability</div>
+      <ul style="padding-left:18px; font-size:13px; line-height:1.9; color:var(--text);">
+        <li>Runs today as a single-machine helper, CPU-only by default — a GPU is optional, only for faster
+        TranAD training</li>
+        <li>Caching and the blocklist keep repeat cases off the expensive agent+LLM path entirely</li>
+        <li>Known ceiling: no multi-host or SIEM aggregation yet — named directly in the roadmap as the next
+        scaling step, not an afterthought</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px;">Customers</div>
+      <ul style="padding-left:18px; font-size:13px; line-height:1.9; color:var(--text);">
+        <li>Built first as a personal security assistant — individuals and power users protecting the machine
+        they're already on</li>
+        <li>Whole-home-network monitoring and SIEM/enterprise integration are named next steps, not prerequisites
+        for delivering value now</li>
+        <li>Every verdict ships with a plain-English reason a non-specialist can act on — the accessibility bar a
+        broader customer base needs</li>
+      </ul>
+    </div>
+  </div>
+  <div class="detail-box" style="margin-top:18px;">
+    <span class="k">Why this holds up</span>
+    The expensive path — a full LangGraph agent run with an LLM call — is the exception, triggered only when the
+    cheap local checks and cache can't already answer. That's what keeps per-check cost low today, and it's the
+    same boundary the roadmap scales outward from rather than rebuilding.
+  </div>
+`);
+
+/* ---------- 14. BUSINESS PLAN ---------- */
+screenWrap(13, `
+  <div class="eyebrow">Business Plan</div>
+  <h1 class="title" style="font-size:clamp(24px,2.6vw,34px);">How this gets packaged and sold</h1>
+  <h2 class="sub">Two products, priced around how they're actually used — scan volume for investigation, a flat
+  annual fee for always-on server protection.</h2>
+  <div class="eyebrow" style="margin-top:26px; margin-bottom:0;">Phishing &amp; Email Protection</div>
+  <div class="grid g3" style="margin-top:14px;">
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px;">Free</div>
+      <div style="font-family:var(--disp); font-size:26px; font-weight:700;">5 scans</div>
+      <div style="font-family:var(--mono); font-size:11px; color:var(--dim); margin-top:2px; text-transform:uppercase; letter-spacing:.06em;">One-time, no card required</div>
+      <ul style="padding-left:18px; margin-top:14px; font-size:13px; line-height:1.9; color:var(--text);">
+        <li>5 free URL scans to try the full verdict + reason</li>
+        <li>Same detection engine as every paid tier</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px; color:var(--cyan);">Premium</div>
+      <div style="font-family:var(--disp); font-size:26px; font-weight:700;">100 scans<span style="font-size:13px; color:var(--muted); font-weight:400;"> / month</span></div>
+      <div style="font-family:var(--mono); font-size:11px; color:var(--dim); margin-top:2px; text-transform:uppercase; letter-spacing:.06em;">Individual plan</div>
+      <ul style="padding-left:18px; margin-top:14px; font-size:13px; line-height:1.9; color:var(--text);">
+        <li>100 URL/email checks per month</li>
+        <li>Full agent investigation on every escalated case</li>
+        <li>History, reports, and case memory retained</li>
+      </ul>
+    </div>
+    <div class="card">
+      <div class="eyebrow" style="margin-bottom:10px; color:var(--green);">Organizational</div>
+      <div style="font-family:var(--disp); font-size:26px; font-weight:700;">Pay &amp; use</div>
+      <div style="font-family:var(--mono); font-size:11px; color:var(--dim); margin-top:2px; text-transform:uppercase; letter-spacing:.06em;">Usage-based billing</div>
+      <ul style="padding-left:18px; margin-top:14px; font-size:13px; line-height:1.9; color:var(--text);">
+        <li>Both URLs and emails covered, billed by volume — no monthly cap</li>
+        <li>Fits teams whose check volume varies week to week</li>
+      </ul>
+    </div>
+  </div>
+  <div class="eyebrow" style="margin-top:26px; margin-bottom:0;">Network Anomaly Detection</div>
+  <div class="card" style="margin-top:14px;">
+    <div style="display:flex; align-items:baseline; gap:14px; flex-wrap:wrap;">
+      <div style="font-family:var(--disp); font-size:26px; font-weight:700; color:var(--amber);">Server Shield</div>
+      <span class="pill" style="border-color:rgba(224,162,68,.35); color:var(--amber);">Single plan · Billed yearly</span>
+    </div>
+    <p style="font-size:13.5px; line-height:1.7; margin-top:12px; max-width:760px;">
+    Activated directly on the server it protects. Isolation Forest and TranAD score connection windows
+    continuously and automatically flag server-side attacks — like a DDoS attempt — the moment the traffic
+    pattern deviates, no manual scan required.</p>
+  </div>
+`);
+
+/* ---------- 15. CLOSE ---------- */
+screenWrap(14, `
   <div class="eyebrow">Final Takeaway</div>
   <h1 class="title">The goal isn't just to<br>detect phishing.</h1>
   <h2 class="sub" style="max-width:640px;">It's to identify abnormal behaviour early enough to reduce its
@@ -890,7 +990,13 @@ async function renderArch(){
     archStage.appendChild(wrap);
     wraps.push(wrap);
   }
-  try { await mermaid.run({ querySelector:'#archMermaid .mermaid' }); } catch(e){}
+  try {
+    // wait for the web fonts to finish loading first — if mermaid measures node
+    // text boxes against the fallback font, the later font swap reflows the
+    // labels without resizing the boxes, clipping the text inside them
+    if (document.fonts && document.fonts.ready) { await document.fonts.ready; }
+    await mermaid.run({ querySelector:'#archMermaid .mermaid' });
+  } catch(e){}
   wraps.forEach((w,i)=> w.classList.toggle('hidden', i!==0));   // hide non-active AFTER layout
 }
 renderArch();
